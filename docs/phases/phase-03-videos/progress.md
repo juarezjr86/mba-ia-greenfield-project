@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 1/20 completed
+**SIs:** 2/20 completed
 
 ### SI-03.1 — Make the migrations integration spec repeatable
 - **Status:** completed
@@ -12,9 +12,13 @@
   - `nestjs-api` container idles with `tail -f /dev/null`; no dev server was started.
 
 ### SI-03.2 — Repair the Phase 02 lint baseline
-- **Status:** pending
-- **Tests:** -
-- **Observations:** none
+- **Status:** completed
+- **Tests:** no new tests (regression oracle): 23 suites / 144 tests passing (same as baseline) + e2e 3 suites / 52 tests passing; `tsc --noEmit` exit 0; `npm run lint` exit 0 (0 errors, 1 warning)
+- **Observations:**
+  - Lint baseline before the repair: 150 errors + 40 warnings. By rule (errors): no-unsafe-member-access 76, no-unsafe-assignment 41, unbound-method 19, no-unsafe-return 6, require-await 4, no-unused-vars 2, no-unsafe-call 1, no-unsafe-function-type 1; warnings: no-unsafe-argument 40. By file: `test/auth.e2e-spec.ts` 48, `auth.service.spec.ts` 45, `mail.service.integration-spec.ts` 16, `channels.service.spec.ts` 15, `auth.service.integration-spec.ts` 7, `domain-exception.filter.spec.ts` 7, `channels.service.ts` 6, others 1-2 each. Only `channels.service.ts` is production code.
+  - Fixes are type-only: typed `PgErrorShape` in `isPgUniqueViolationOnColumn`; typed Mailpit helper (`MailpitMessageSummary/Detail`); `MockOf<T>`, `serviceMock`, `repoMock` in `auth.service.spec.ts` (replaces `jest.Mocked`, which triggers `unbound-method`); `bodyOf` and `getMailService` in the e2e spec; `createTestDataSource` takes `DataSourceOptions['entities']` instead of `Function`.
+  - No `eslint-disable` added and `eslint.config.mjs` untouched. 1 `no-unsafe-argument` warning remains (`auth.service.integration-spec.ts:472`); the rule is configured as a warning, out of the SI's "zero errors" scope.
+  - `npm run lint` runs with `--fix`; `git status` after it showed only the intended files.
 
 ### SI-03.3 — Compose services for storage and queue, ffmpeg in the image
 - **Status:** pending
