@@ -54,6 +54,11 @@ _Subprojects in scope:_
 **Decision:** **A (BullMQ on Redis)** - accepted from the research recommendation (student, 2026-10-10)
 **Libraries:** bullmq, @nestjs/bullmq
 
+**Revisions:**
+
+- 2026-10-18 — Libraries: `ioredis` is added (`^5.11.1`); the Libraries line above is superseded by `bullmq`, `@nestjs/bullmq`, `ioredis`. _Rationale:_ found in SI-03.7: `bullmq` 6.3.17 lists `ioredis` (>=5.0.0) only as an optional peer, and `connection: { host, port }` fails with "BullMQ could not load the optional 'ioredis' package" without it. Version 5.x chosen because it was the one exercised against the Compose Redis; 6.0.0 exists and was not tested (student, 2026-10-18).
+- 2026-10-18 — Test tooling: `@nestjs/bullmq` 12.0.0 is ESM-only (`"type": "module"`); Node 25 loads it with `require`, but Jest 30 in CommonJS mode fails with `SyntaxError: Unexpected token 'export'`. Both Jest configs (`package.json` and `test/jest-e2e.json`) get `transformIgnorePatterns` for `@nestjs/bullmq` and `@nestjs/bull-shared` and a ts-jest transform with `allowJs` for `.js`. _Rationale:_ keeps the decided library versions; alternatives rejected by the student: downgrading `@nestjs/bullmq` to 11.x (compatibility with `bullmq` 6 not verified) and Jest native ESM (changes every suite) (student, 2026-10-18).
+
 ---
 
 ## TD-02: Upload Strategy for Files up to 10GB

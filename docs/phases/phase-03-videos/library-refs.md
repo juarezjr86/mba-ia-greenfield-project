@@ -8,6 +8,9 @@ libs:
     version: "^12.0.0"
     context7_id: "/nestjs/bull"
     fetched_at: "2026-10-10T23:10:33-03:00"
+  ioredis: # added 2026-10-18 (SI-03.7, TD-01 Revision); not queried in Context7
+    version: "^5.11.1"
+    fetched_at: "2026-10-18"
   "@aws-sdk/client-s3":
     version: "^3.1149.0"
     context7_id: "/aws/aws-sdk-js-v3"
@@ -160,6 +163,18 @@ const url = await getSignedUrl(client, new GetObjectCommand({ Bucket, Key }), { 
 ### Public vs internal endpoint (TD-04 Revision, ICC-1)
 
 A presigned URL is bound to the host that signed it. The README excerpt does not cover signing for a different public host. **Inference, not documented:** use a second `S3Client` whose `endpoint` is `S3_PUBLIC_ENDPOINT` only for presigning, and keep the internal-endpoint client for server-side calls; the storage SI smoke test must exercise a presigned URL fetched from the host-published address.
+
+## ioredis (added 2026-10-18, SI-03.7)
+
+**Source:** installed package metadata, not Context7. `bullmq@6.3.17` declares `ioredis >=5.0.0` as an **optional** peer (also `redis`, `pg`, `bullmq-otel`); with `connection: { host, port }` BullMQ loads `ioredis` itself and throws "BullMQ could not load the optional 'ioredis' package" when it is missing. Installed `^5.11.1` (TD-01 Revision of 2026-10-18); `6.0.0` exists and was not tested. No application code imports `ioredis` directly.
+
+### Jest and the ESM-only `@nestjs/bullmq`
+
+`@nestjs/bullmq@12.0.0` and `@nestjs/bull-shared` are `"type": "module"`. Node 25 `require`s them at runtime, but Jest 30 (CommonJS) needs both packages transformed: `transformIgnorePatterns: ["/node_modules/(?!(@nestjs/bullmq|@nestjs/bull-shared)/)"]` plus a ts-jest transform with `allowJs` for `.js`, in `package.json` and `test/jest-e2e.json`.
+
+### Prefix reaches the Worker
+
+Read in `@nestjs/bullmq/dist/bull.explorer.js` and `bull.providers.js`: the root `prefix` of `BullModule.forRootAsync` is forwarded to the `Queue`, to `QueueEvents` and to the `Worker` created for a `@Processor`. SI-03.13 does not need to pass it explicitly.
 
 ## @aws-sdk/lib-storage (DROPPED 2026-10-18 — not installed; kept for reference only)
 

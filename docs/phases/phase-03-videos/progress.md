@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 6/20 completed
+**SIs:** 7/20 completed
 
 ### SI-03.1 — Make the migrations integration spec repeatable
 - **Status:** completed
@@ -66,9 +66,14 @@
   - Not committed.
 
 ### SI-03.7 — Video queue producer
-- **Status:** pending
-- **Tests:** -
-- **Observations:** none
+- **Status:** completed
+- **Tests:** `src/queue` 2 suites / 6 tests passing (producer integration against the real Redis with a private prefix, module compile); full suite 30 suites / 192 tests passing (186 + 6), run twice, Jest exits on its own; e2e 3 suites / 52 tests passing; `tsc --noEmit` exit 0; `npm run lint` exit 0 (0 errors, 1 warning, unchanged); `npm run build` succeeds
+- **Observations:**
+  - Two blockers found by the first test run and decided by the student (option A on both, 2026-10-18), recorded as Revisions in `TD-01` and in `library-refs.md`: (1) `ioredis` was missing (`bullmq` 6.3.17 only lists it as an optional peer; the plan and `library-refs.md` never mentioned it) → installed `ioredis ^5.11.1`; 6.0.0 exists and was not tested. (2) `@nestjs/bullmq@12.0.0` is ESM-only and Jest 30 (CJS) failed with `SyntaxError: Unexpected token 'export'` → `transformIgnorePatterns` for `@nestjs/bullmq` and `@nestjs/bull-shared` plus a ts-jest `allowJs` transform for `.js`, in both `package.json` and `test/jest-e2e.json` (the latter needed later when `AppModule` imports `QueueModule`; it was changed now to keep both configs equal).
+  - `prefix` reaches the Worker: read in `@nestjs/bullmq` `bull.explorer.js` / `bull.providers.js` (root `prefix` is forwarded to Queue, QueueEvents and the Worker of a `@Processor`), so SI-03.13 does not pass it explicitly.
+  - Acceptance verified by the integration spec: job named `process-video`, data `{ videoId }`, id = `videoId`; `attempts` 3 and `{ type: 'exponential', delay: 30000 }` with the defaults; two enqueues of the same video leave one job; a queue with another prefix does not see the job; `queue.getWorkers()` is `[]`. The suite removes its data with `queue.obliterate({ force: true })`.
+  - `QueueModule` exports the registered-queue dynamic module and `VideoQueueProducer`; it registers no `@Processor`. `VideosModule` does not import it yet (SI-03.11).
+  - Process note: the first attempt to run the suite was interrupted by the user; the SI-03.6 commit (`5f1519f`) came right before. SI-03.7 is not committed.
 
 ### SI-03.8 — Endpoint POST /videos (initiate upload)
 - **Status:** pending
