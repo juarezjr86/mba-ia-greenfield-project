@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 3/20 completed
+**SIs:** 4/20 completed
 
 ### SI-03.1 — Make the migrations integration spec repeatable
 - **Status:** completed
@@ -31,9 +31,14 @@
   - Noticed, out of scope: `.env.example` has `MAIL_FROM="StreamTube" <noreply@streamtube.com>`, which breaks Compose parsing when copied as `.env` (known upstream issue, see `nestjs-project/CLAUDE.md` → Environment File Conventions); SI-03.4 touches `.env.example` and can quote it.
 
 ### SI-03.4 — Dependencies, configuration namespaces and env validation
-- **Status:** pending
-- **Tests:** -
-- **Observations:** none
+- **Status:** completed
+- **Tests:** `env.validation.integration-spec.ts` 14 passing (10 new); full suite 23 suites / 154 tests passing (144 + 10); e2e 3 suites / 52 tests passing; `tsc --noEmit` exit 0; `npm run lint` exit 0 (0 errors, 1 warning, same as before)
+- **Observations:**
+  - Installed `bullmq ^6.3.17`, `@nestjs/bullmq ^12.0.0`, `@aws-sdk/client-s3 ^3.1152.0`, `@aws-sdk/s3-request-presigner ^3.1152.0` (newer patch than the `library-refs.md` versions, same ranges). `@aws-sdk/lib-storage` is not in `package.json`. The Context7 re-check against the installed versions was not done here because this SI only installs; it is due in SI-03.5 (S3 commands) and SI-03.7 (queue), where the APIs are first called.
+  - Created `storage.config.ts`, `queue.config.ts`, `videos.config.ts` (`registerAs` + `parseInt`, same shape as `auth.config.ts`), registered in `AppModule` `load`; Joi schema holds the same defaults and ranges (`UPLOAD_PART_SIZE_BYTES` 5242880..2147483647). Defaults for `S3_BUCKET`, `S3_CORS_ALLOWED_ORIGINS` and the videos limits are the plan's Hipótese values, kept configurable.
+  - Acceptance: with all variables the app boots and `GET /` returns 200 (one-off `ts-node` bootstrap on port 3999, file removed afterwards, no dev server left running); with an empty `S3_ACCESS_KEY` bootstrap fails with `Config validation error: "S3_ACCESS_KEY" is not allowed to be empty`; `1048576` and `3000000000` are rejected (also `5242879`, `2147483648`), `5242880` and `2147483647` accepted; `compose.yaml` has no `localhost`, and `S3_PUBLIC_ENDPOINT` is the only host-address entry in the example env file.
+  - `.env.example` (and the local `.env`) now list all new keys with Compose-network values; `MAIL_FROM` in `.env.example` was quoted (the SI-03.3 out-of-scope note), so a copy of the example no longer breaks Compose parsing.
+  - Not committed: the commit authorization covered SI-03.1, SI-03.2 and (on request) SI-03.3 only.
 
 ### SI-03.5 — Storage module: S3 clients, multipart, presigning and idempotent bucket bootstrap
 - **Status:** pending
