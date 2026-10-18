@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 4/20 completed
+**SIs:** 5/20 completed
 
 ### SI-03.1 — Make the migrations integration spec repeatable
 - **Status:** completed
@@ -41,9 +41,17 @@
   - Not committed: the commit authorization covered SI-03.1, SI-03.2 and (on request) SI-03.3 only.
 
 ### SI-03.5 — Storage module: S3 clients, multipart, presigning and idempotent bucket bootstrap
-- **Status:** pending
-- **Tests:** -
-- **Observations:** none
+- **Status:** completed
+- **Tests:** `src/storage` 3 suites / 20 tests passing (integration against the real `pgsty/silo`, unit, module), run without `--forceExit` and the process exits; full suite 26 suites / 174 tests passing (154 + 20); e2e 3 suites / 52 tests passing; `tsc --noEmit` exit 0; `npm run lint` exit 0 (0 errors, 1 warning, unchanged)
+- **Observations:**
+  - API source: the installed `@aws-sdk/client-s3@3.1152.0` `.d.ts` files (command inputs, `ListPartsOutput.NextPartNumberMarker: string`, `CORSRule`, `ResponseContentDisposition`), not Context7; the Context7 re-check promised in SI-03.4 was replaced by these type reads and by the real-storage tests.
+  - **CORS on the pinned silo works:** `PutBucketCors` is accepted and `GetBucketCors` returns `ExposeHeaders` containing `ETag` and `PUT/GET/HEAD` (asserted in the integration spec, not just "did not throw"). The unverified-tag concern of SI-03.3 is covered for this tag.
+  - **Checksum branch (action 4): not needed.** With SDK defaults the presigned `UploadPart` URL carries `x-amz-checksum-crc32` and `x-amz-sdk-checksum-algorithm` (query keys logged by the test: `X-Amz-Algorithm, X-Amz-Content-Sha256, X-Amz-Credential, X-Amz-Date, X-Amz-Expires, X-Amz-Signature, X-Amz-SignedHeaders, partNumber, uploadId, x-amz-checksum-crc32, x-amz-sdk-checksum-algorithm, x-id`), yet the silo accepted a raw `fetch` PUT of a real 5 MiB buffer (and a 1 KiB last part) with `200` and an `ETag`, so `requestChecksumCalculation: 'WHEN_REQUIRED'` was not set. Risk: the checksum value in the URL cannot match the real part bytes, so a stricter S3 (real AWS) would reject it; silo ignores it. Switching the option on both clients is a one-line change if the target storage ever changes.
+  - Host-machine AC: URL produced by the public client (signed for `localhost:9000`) and fetched with `curl.exe -H "Range: bytes=0-99" "<url>"` from PowerShell answered `HTTP/1.1 206 Partial Content`, `Content-Length: 100`, `Content-Range: bytes 0-99/1000`.
+  - `npm run storage:init` ran twice, both printed `Storage bucket and CORS are ready` (exit status verified through the printed message and `tail`, not `$?` of npm).
+  - Design choices: `headObject` returns `null` on 404 (SI-03.11 needs to tell "object finalized by an earlier call" apart from an error) and rethrows everything else; `ensureBucket` treats only a 404 from `HeadBucket` as "absent" and tolerates `BucketAlreadyOwnedByYou`; `StorageService.onModuleDestroy` destroys both clients; `listAllParts` returns `{ partNumber, sizeBytes, etag }`; the integration spec overrides `storageConfig.KEY` (bucket `streamtube-test`, public endpoint `http://storage:9000`) instead of mutating `process.env`, and deletes its objects in `afterAll`.
+  - Left behind in the dev bucket `streamtube`: object `smoke/host-curl.bin` (1000 bytes) from the host `curl` check; `StorageService` has no delete method, so it was not removed.
+  - Not committed (commit authorization is per request).
 
 ### SI-03.6 — Video entity, migration and test cleanup
 - **Status:** pending
