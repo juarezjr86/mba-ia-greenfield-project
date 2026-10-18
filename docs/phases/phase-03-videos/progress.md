@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 7/20 completed
+**SIs:** 8/20 completed
 
 ### SI-03.1 — Make the migrations integration spec repeatable
 - **Status:** completed
@@ -76,9 +76,16 @@
   - Process note: the first attempt to run the suite was interrupted by the user; the SI-03.6 commit (`5f1519f`) came right before. SI-03.7 is not committed.
 
 ### SI-03.8 — Endpoint POST /videos (initiate upload)
-- **Status:** pending
-- **Tests:** -
-- **Observations:** none
+- **Status:** completed
+- **Tests:** new: `upload-plan.util.spec.ts` 7, `video-naming.util.spec.ts` 10, `videos.service.spec.ts` 8, `videos.service.integration-spec.ts` 5 (real database and storage), `channels.service.integration-spec.ts` +2 (`findByUserId`), `test/videos-initiate-upload.e2e-spec.ts` 8 (authored from `specs/videos-initiate-upload.plan.md`); full suite 34 suites / 224 tests passing (192 + 32), run twice; e2e 4 suites / 60 tests passing with `--runInBand`; `tsc --noEmit` exit 0; `npm run lint` exit 0 (0 errors, 1 warning, unchanged); `npm run build` succeeds
+- **Observations:**
+  - Advisor consulted before implementing (project rule for risk SIs). Applied: the new integration and e2e specs use test buckets that do not exist on a fresh clone (`streamtube-test-videos`, `streamtube-test-e2e-videos`) and call `ensureBucket()` themselves, so they do not depend on a manual `storage:init` and do not write to the dev bucket; all writes inside `initiateUpload` go through the transaction `manager` (the "no row remains" test asserts `count() === 0` on the real database); `ChannelsService` constructor untouched (`findByUserId` uses `dataSource.getRepository`); the response is mapped explicitly (no `upload_id` / `storage_key`); a shared e2e helper `test/helpers/videos-e2e.ts` (`bodyOf`, `createVideosTestApp`, `registerConfirmedUser`) is for the next 7 videos e2e specs, `auth.e2e-spec.ts` left alone.
+  - Throttle: `@Throttle` is at class level with `{ default: { limit: () => videosConfig().throttleLimit, ttl: () => videosConfig().throttleTtlMs } }`. Confirmed in the installed `@nestjs/throttler`: `limit`/`ttl` are `Resolvable<number>` (a function is allowed), `forRoot([{ ttl, limit }])` names the throttler `default`, and the functions run per request, after `.env` is loaded into `process.env`. The 429 body is the throttler's own (not `ApiErrorEnvelope`); it is documented as such in `@ApiResponse(429)`.
+  - Edge handled in `computeUploadPlan`: rounding a configured part size of `2147483647` up to a whole MiB would overflow the `integer` column, so the result is capped at `2147483647` (then not a MiB multiple; S3 only needs >= 5 MiB for non-last parts). With the defaults this never happens (64 MiB, 160 parts for 10 GiB).
+  - Ordering in the service: size check, then channel lookup, then the transaction (insert draft, `createMultipartUpload`, update `upload_id` and plan). If storage succeeds and the commit then fails, a multipart upload stays orphaned in storage; accepted by TD-05 (no cleanup in Phase 03), same as abandoned drafts.
+  - Not covered by this SI: nothing calls `ensureBucket()` at application start; the bucket still has to be created with `npm run storage:init` before the first real upload (SI-03.14 / SI-03.19 may wire it in).
+  - `npm run test:e2e` without `--runInBand` runs the suites in parallel and failed (9 tests, `auth` and `videos-initiate-upload` contaminating each other through the shared database); with `--runInBand`, as the project rule and the Deliverables require, it passes.
+  - Not committed.
 
 ### SI-03.9 — Endpoint POST /videos/:id/upload/part-urls
 - **Status:** pending

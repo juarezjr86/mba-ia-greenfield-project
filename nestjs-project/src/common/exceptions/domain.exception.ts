@@ -48,3 +48,19 @@ export class TokenReuseDetectedException extends DomainException {
     );
   }
 }
+
+export class ChannelNotFoundException extends DomainException {
+  constructor() {
+    super('CHANNEL_NOT_FOUND', 404, 'Channel not found for the current user');
+  }
+}
+
+export class UploadSizeExceededException extends DomainException {
+  constructor(maxSizeBytes: number) {
+    super(
+      'UPLOAD_SIZE_EXCEEDED',
+      400,
+      `File size exceeds the maximum of ${maxSizeBytes} bytes`,
+    );
+  }
+}
