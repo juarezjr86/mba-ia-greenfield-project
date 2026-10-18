@@ -36,6 +36,7 @@ export async function dropAllEnumTypes(dataSource: DataSource): Promise<void> {
 }
 
 export async function cleanAllTables(dataSource: DataSource): Promise<void> {
+  await dataSource.query('DELETE FROM "videos"');
   await dataSource.query('DELETE FROM "refresh_tokens"');
   await dataSource.query('DELETE FROM "verification_tokens"');
   await dataSource.query('DELETE FROM "channels"');

@@ -166,3 +166,7 @@
   `library-refs.md` (lib-storage anotada como descartada) e a decisão do aluno sobre commits
   (preflight do `/implement` exige árvore limpa fora de `nestjs-project/`; o TD-12 exige
   commits dedicados em SI-03.1 e SI-03.2).
+
+### L-20. `Promise.all` de DROP TABLE ... CASCADE trava o banco de teste (deadlock)
+- **Simples:** quando a SI-03.6 somou a tabela `videos`, que aponta para `channels`, a suíte de migrations passou a falhar com "deadlock detected" na primeira rodada e a passar na segunda. A causa era apagar as tabelas em paralelo.
+- **Técnico:** `dataSource.query` em `Promise.all` usa conexões diferentes do pool; `DROP TABLE ... CASCADE` em tabelas ligadas por FK pega travas em ordens opostas. Corrigido com laço sequencial em `migrations.integration-spec.ts` (3 rodadas completas verdes a partir de schema virgem). Efeito colateral da mesma SI: `Channel` ganhou `videos`, então toda lista `ALL_ENTITIES` dos testes precisou incluir `Video` (o `createTestDataSource` sincroniza o schema), e `npx prettier --write src` reformatou dois `.hbs`, revertidos com `git checkout`.
