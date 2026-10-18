@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 2/20 completed
+**SIs:** 3/20 completed
 
 ### SI-03.1 — Make the migrations integration spec repeatable
 - **Status:** completed
@@ -21,9 +21,14 @@
   - `npm run lint` runs with `--fix`; `git status` after it showed only the intended files.
 
 ### SI-03.3 — Compose services for storage and queue, ffmpeg in the image
-- **Status:** pending
-- **Tests:** -
-- **Observations:** none
+- **Status:** completed
+- **Tests:** no tests (Infra); regression check: 23 suites / 144 tests passing after the rebuild
+- **Observations:**
+  - Pinned tags: `pgsty/silo:RELEASE.2026-10-18T00-00-00Z` (newest non-distroless release on Docker Hub on 2026-10-18; the distroless variant was avoided to keep a shell in the container) and `redis:7.4.11` (assumption: no TD fixes the Redis version; BullMQ only needs `noeviction`). The tag used in the 2026-10-10 research spike is not recorded in the docs, so the spike evidence was not tied to this exact tag; the SI-03.5 smoke test against the real storage covers it.
+  - Acceptance: `ffprobe`/`ffmpeg` 5.1.9 exit 0 inside `nestjs-api`; `redis-cli CONFIG GET maxmemory-policy` = `noeviction`; `curl http://storage:9000` returns HTTP 403 (S3 answers anonymous root with 403, not a connection error) and `/minio/health/live` returns 200; `docker compose -f compose.yaml config -q` exit 0 (works without `compose.override.yaml`); the `node_modules` volume survived the recreate of `nestjs-api`.
+  - `S3_ACCESS_KEY` / `S3_SECRET_KEY` were added to `.env.example` and the local `.env` already in this SI because Compose interpolates them (`${VAR:?}` fails loudly when missing); the Joi validation and the config namespace stay in SI-03.4. Values are the local-dev placeholders `streamtube` / `streamtube-secret`.
+  - `storage` has no healthcheck (`depends_on: service_started`): the image's tooling for a probe was not verified; `redis` has `redis-cli ping` and `service_healthy`.
+  - Noticed, out of scope: `.env.example` has `MAIL_FROM="StreamTube" <noreply@streamtube.com>`, which breaks Compose parsing when copied as `.env` (known upstream issue, see `nestjs-project/CLAUDE.md` → Environment File Conventions); SI-03.4 touches `.env.example` and can quote it.
 
 ### SI-03.4 — Dependencies, configuration namespaces and env validation
 - **Status:** pending
