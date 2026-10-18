@@ -23,6 +23,18 @@ export function createTestDataSource(
   });
 }
 
+export async function dropAllEnumTypes(dataSource: DataSource): Promise<void> {
+  const enums = await dataSource.query<{ typname: string }[]>(
+    `SELECT t.typname
+     FROM pg_type t
+     JOIN pg_namespace n ON n.oid = t.typnamespace
+     WHERE t.typtype = 'e' AND n.nspname = 'public'`,
+  );
+  for (const { typname } of enums) {
+    await dataSource.query(`DROP TYPE IF EXISTS "public"."${typname}" CASCADE`);
+  }
+}
+
 export async function cleanAllTables(dataSource: DataSource): Promise<void> {
   await dataSource.query('DELETE FROM "refresh_tokens"');
   await dataSource.query('DELETE FROM "verification_tokens"');
