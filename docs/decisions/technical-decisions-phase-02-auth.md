@@ -238,6 +238,10 @@ _Subprojects in scope:_
 
 **Decision:** A (@nestjs/throttler)
 
+**Revisions:**
+
+- 2026-10-18 — As implemented, ThrottlerGuard is a global APP_GUARD registered in AuthModule (10 requests per 60 s for every route), not scoped to AuthModule. Phase 03 keeps @nestjs/throttler (same Option A) and overrides the limit per controller: every VideosController route uses its own @Throttle read from env (VIDEOS_THROTTLE_LIMIT, VIDEOS_THROTTLE_TTL_MS) instead of the global 10 per minute. _Rationale:_ student decision (2026-10-18); the reason beyond "the videos routes need a limit independent of the auth one" is not recorded.
+
 ---
 
 ## TD-09: Refresh Token Format

@@ -1,7 +1,7 @@
 ---
 name: plan-context
 description: "Stage 1 of the plan pipeline (phase and task modes). Consolidates project-plan.md (phase mode), decisions docs (phase-scope + ad-hoc tied to the phase, or the task's own + correlated docs), prior phases (or latest completed phase) and testing guide into a lean context.md. Use when the user asks to start planning a phase or task, generate the context, or run the first stage of the planning pipeline. Triggers: 'plan-context NN', 'plan-context <slug>', 'plan-context \"prose\"', 'gera o contexto da fase NN', 'inicia planejamento da task <slug>'."
-disable-model-invocation: true
+disable-model-invocation: false
 ---
 
 # Plan Pipeline — Stage 1: Context
