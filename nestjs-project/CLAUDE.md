@@ -36,7 +36,7 @@ Services:
 - `db` — PostgreSQL 17, port `5432`, database `streamtube`, user/password `streamtube`
 - `mailpit` — SMTP `1025`, web UI `8025`
 - `storage` — S3-compatible object storage, image `pgsty/silo:RELEASE.2026-10-18T00-00-00Z` (replaces MinIO, whose official image is no longer distributed; the tag is pinned, never `latest`), S3 on `9000`, console on `9001`, volume `storage_data`
-- `redis` — Redis 7.4.11 with `--maxmemory-policy noeviction` (BullMQ requires it), healthcheck `redis-cli ping`
+- `redis` — Redis 7.4.11 with `--maxmemory-policy noeviction` (BullMQ requires it) and `--appendonly yes` on the `redis_data` volume, so the queue survives a restart or a recreate of the container (the fsync is every second: a crash can lose up to one second of writes); healthcheck `redis-cli ping`
 - `video-worker` — the queue consumer: same image and bind mount as `nestjs-api`, entrypoint `src/worker.ts`, no published port, `stop_grace_period: 60s`. Its command is the exec form of `npm run start:worker` on purpose (under `npm run` the `SIGTERM` of `docker compose stop` ended the process before the shutdown hooks ran)
 
 `ffmpeg` and `ffprobe` are installed by `Dockerfile.dev`. After `docker compose up -d`, create the bucket once with `docker compose exec nestjs-api npm run storage:init` (nothing creates it at application start).
@@ -224,6 +224,10 @@ docker compose exec nestjs-api npm run openapi:export     # rewrite openapi.json
 - Abandoned drafts and their multipart uploads are not cleaned up in this phase (follow-up for Phase 04). The storage lifecycle rule `AbortIncompleteMultipartUpload` is not applied: `pgsty/silo` rejected it in the research spike (OQ-1), so orphan parts stay in the volume until someone removes them.
 - Processing was validated only for MP4/H.264. The metadata spike read a 2.08 GB MP4 with `moov` at the end; the 10 GiB smoke proved the upload path and the API's responsiveness with zero-filled bytes (a file that ends `failed`), so no real video above about 2 GB went through `ffprobe` and `ffmpeg`.
 - `openapi.json` request DTOs have empty `properties`: the Swagger plugin does not run under the `ts-node` export script (response DTOs are complete).
+- A video `processing` whose job was lost (Redis data wiped, for example `docker compose down -v`, or a crash inside the one-second fsync window) stays `processing`: nothing re-enqueues it by itself. The owner recovers it by calling `POST /videos/:id/upload/complete` again, which is idempotent and enqueues the job (`VideosService.completeUpload`); an automatic re-enqueue of orphan `processing` videos is a follow-up for Phase 04.
+- The presigned `UploadPart` URL carries an `x-amz-checksum-crc32` that the SDK computes without the body. `pgsty/silo` ignores it; a strict S3 (AWS) would reject the part `PUT`. Fix when moving off the silo: `requestChecksumCalculation: 'WHEN_REQUIRED'` on both S3 clients, with the storage integration spec as the oracle.
+- `GET /videos/:id/upload/parts` on a draft whose multipart upload storage already finalized (the recovery case `completeUpload` handles) does not translate the SDK's `NoSuchUpload`: `VideosService.listUploadedParts` calls `listAllParts` without the `isNoSuchUpload` check that `completeUpload` has, so the raw SDK error reaches the exception filter (read in the code, not measured; expected `500`). The client recovers by calling `POST /videos/:id/upload/complete`.
+- The `storage` service has no healthcheck: `nestjs-api` and `video-worker` depend on it with `service_started`, so they can start before storage accepts connections. Neither process calls storage at boot (the bucket comes from `storage:init`), so nothing fails at startup, but a request in the first seconds after `docker compose up` can fail. Not measured.
 
 ## Architecture
 

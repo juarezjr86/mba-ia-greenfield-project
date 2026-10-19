@@ -24,6 +24,11 @@ decidir as lacunas do `progress.md`).
   SI-03.17+03.18 `931f5a4`, SI-03.19 `e197296`, SI-03.20 `ef44527`, `fix(media)` do `ffprobe`
   (`ACCEPTED_CONTAINERS`, `notAVideo()`, timeout de 60 s) `fb15975`. O commit `docs:` com `progress.md`,
   plano, `licoes.md` e este arquivo é o último da fase (conferir com `git log`).
+  **Depois disso (2026-10-19):** PR #1 `dev`→`main` mesclado (`16d77f8`); `bugfix/worker-stalled-job` (a "lacuna"
+  do stalled job não existia, L-32); revisão do Fable (APROVADO COM RESSALVAS) e `bugfix/redis-persistence`
+  (`39295d5`, Redis com `--appendonly yes`, L-33) mesclada em `dev`; **PR #2 `dev`→`main` aberto e NÃO mesclado**
+  (https://github.com/juarezjr86/mba-ia-greenfield-project/pull/2). Retomar: leia a memória e o `progress.md`
+  ("Follow-up"). Próximo passo: o aluno decide o merge do PR #2. Pendente: nada bloqueante.
 - Verificação final (verde): unit/integração 42 suítes / 442 testes; e2e 12 / 140
   (`npm run test:e2e -- --runInBand`); `tsc --noEmit` 0; `npm run lint` 0 erros (1 aviso antigo em
   `auth.service.integration-spec.ts:473`); build 0; `prettier --check` limpo.
