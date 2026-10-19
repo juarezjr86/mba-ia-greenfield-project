@@ -488,6 +488,73 @@ describe('VideosService (integration, real database, storage and queue)', () => 
     });
   });
 
+  describe('getStreamUrl', () => {
+    const BODY = Uint8Array.from({ length: 1000 }, (_, i) => (i % 251) + 1);
+
+    async function createVideoWithObject(
+      userId: string,
+      status: VideoStatus,
+    ): Promise<Video> {
+      const { id } = await videosService.initiateUpload(userId, dto);
+      const video = await dataSource
+        .getRepository(Video)
+        .findOneByOrFail({ id });
+      await storageService.putObject(video.storage_key, BODY, 'video/mp4');
+      await dataSource.getRepository(Video).update(id, { status });
+      return video;
+    }
+
+    it('returns a URL that storage serves with 206 and the exact Content-Range', async () => {
+      const { userId } = await createUserWithChannel();
+      const video = await createVideoWithObject(userId, VideoStatus.READY);
+
+      const { url, expires_in } = await videosService.getStreamUrl(
+        undefined,
+        video.id,
+      );
+
+      expect(expires_in).toBe(testVideosConfig.presignGetExpiresSeconds);
+      const res = await fetch(url, { headers: { Range: 'bytes=0-99' } });
+      expect(res.status).toBe(206);
+      expect(res.headers.get('content-range')).toBe('bytes 0-99/1000');
+      expect(new Uint8Array(await res.arrayBuffer())).toEqual(
+        BODY.slice(0, 100),
+      );
+    });
+
+    it('lets the owner stream a processing video', async () => {
+      const { userId } = await createUserWithChannel();
+      const video = await createVideoWithObject(userId, VideoStatus.PROCESSING);
+
+      const { url } = await videosService.getStreamUrl(userId, video.id);
+
+      const res = await fetch(url, { headers: { Range: 'bytes=0-9' } });
+      expect(res.status).toBe(206);
+    });
+
+    it('answers VIDEO_FILE_NOT_AVAILABLE to the owner of a draft', async () => {
+      const { userId } = await createUserWithChannel();
+      const { id } = await videosService.initiateUpload(userId, dto);
+
+      await expect(
+        videosService.getStreamUrl(userId, id),
+      ).rejects.toMatchObject({ errorCode: 'VIDEO_FILE_NOT_AVAILABLE' });
+    });
+
+    it('hides a processing video from another user as VIDEO_NOT_FOUND', async () => {
+      const owner = await createUserWithChannel();
+      const other = await createUserWithChannel();
+      const video = await createVideoWithObject(
+        owner.userId,
+        VideoStatus.PROCESSING,
+      );
+
+      await expect(
+        videosService.getStreamUrl(other.userId, video.id),
+      ).rejects.toMatchObject({ errorCode: 'VIDEO_NOT_FOUND' });
+    });
+  });
+
   describe('getVisibleVideo', () => {
     async function initiateDraft(userId: string): Promise<{ id: string }> {
       return videosService.initiateUpload(userId, dto);

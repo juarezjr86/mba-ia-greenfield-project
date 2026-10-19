@@ -103,6 +103,16 @@ export class VideoSizeMismatchException extends DomainException {
   }
 }
 
+export class FileNotAvailableException extends DomainException {
+  constructor() {
+    super(
+      'VIDEO_FILE_NOT_AVAILABLE',
+      409,
+      'The video file is not available yet: the upload was not completed',
+    );
+  }
+}
+
 export class InvalidPartNumbersException extends DomainException {
   constructor(partCount: number) {
     super(

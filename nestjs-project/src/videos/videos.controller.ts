@@ -28,6 +28,7 @@ import { InitiateUploadResponseDto } from './dto/initiate-upload-response.dto';
 import { InitiateUploadDto } from './dto/initiate-upload.dto';
 import { PartUrlsResponseDto } from './dto/part-urls-response.dto';
 import { PartUrlsDto } from './dto/part-urls.dto';
+import { PresignedUrlResponseDto } from './dto/presigned-url-response.dto';
 import { UploadedPartsResponseDto } from './dto/uploaded-parts-response.dto';
 import { toVideoResponse, VideoResponseDto } from './dto/video-response.dto';
 import { VideosService } from './videos.service';
@@ -277,5 +278,62 @@ export class VideosController {
       id,
     );
     return toVideoResponse(video, isOwner);
+  }
+
+  @Get(':id/stream')
+  @Public()
+  @OptionalAuth()
+  @ApiHeader({
+    name: 'Authorization',
+    required: false,
+    description:
+      'Optional `Bearer <access_token>`. Without it the caller is anonymous and can stream only ready videos; a token that is sent but invalid or expired is a 401.',
+  })
+  @ApiOperation({
+    summary: 'Get a URL to stream a video',
+    description:
+      'Returns a short-lived presigned URL. The player reads the file straight from storage, which answers `Range` requests with `206`, so seeking does not download the whole file. The owner can stream a video that is still processing or failed; everyone else only a ready one.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Presigned URL and its lifetime',
+    type: PresignedUrlResponseDto,
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'The video id is not a uuid',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'An access token was sent but is invalid or expired',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 404,
+    description:
+      'The video does not exist, or it is not ready and the caller is not its owner',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 409,
+    description:
+      'The owner asked for a video still in draft: no file was stored yet (VIDEO_FILE_NOT_AVAILABLE)',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 429,
+    description:
+      'Too many requests: the limit of the videos routes was exceeded (plain throttler body, not the error envelope)',
+  })
+  async getStreamUrl(
+    @CurrentUser() user: JwtPayload | undefined,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<PresignedUrlResponseDto> {
+    const { url, expires_in } = await this.videosService.getStreamUrl(
+      user?.sub,
+      id,
+    );
+    return { url, expires_in };
   }
 }

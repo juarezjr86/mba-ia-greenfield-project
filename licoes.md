@@ -170,3 +170,35 @@
 ### L-20. `Promise.all` de DROP TABLE ... CASCADE trava o banco de teste (deadlock)
 - **Simples:** quando a SI-03.6 somou a tabela `videos`, que aponta para `channels`, a suíte de migrations passou a falhar com "deadlock detected" na primeira rodada e a passar na segunda. A causa era apagar as tabelas em paralelo.
 - **Técnico:** `dataSource.query` em `Promise.all` usa conexões diferentes do pool; `DROP TABLE ... CASCADE` em tabelas ligadas por FK pega travas em ordens opostas. Corrigido com laço sequencial em `migrations.integration-spec.ts` (3 rodadas completas verdes a partir de schema virgem). Efeito colateral da mesma SI: `Channel` ganhou `videos`, então toda lista `ALL_ENTITIES` dos testes precisou incluir `Video` (o `createTestDataSource` sincroniza o schema), e `npx prettier --write src` reformatou dois `.hbs`, revertidos com `git checkout`.
+
+### L-21. A ordem das checagens decide o que um estranho consegue descobrir (SI-03.9 e SI-03.16)
+- **Simples:** se a rota responde "conflito" antes de responder "não existe para você", ela confirma a um estranho que o rascunho existe. Na SI-03.9 a ordem também decidia se um erro era alcançável.
+- **Técnico:** SI-03.9: tamanho do lote (sem I/O) → dono e status → números de parte contra `part_count`; com parte de 64 MiB um vídeo de ~128 MiB tem 2 partes, então checar `part_count` primeiro tornaria `PART_URLS_BATCH_TOO_LARGE` inalcançável. SI-03.16: `getStreamUrl` chama `getVisibleVideo` (404 para quem não pode ver) e só depois mapeia `draft` para 409; a matriz do unit afirma que um estranho nunca recebe 409 e que `presignGet` não é chamado em 404/409.
+
+### L-22. Provar o comportamento do storage com uma sonda antes de escrever o ramo de recuperação (SI-03.11)
+- **Simples:** o plano supunha que, depois de finalizar o upload multipart, o storage responderia de um jeito reconhecível. Em vez de confiar, rodei uma sonda descartável.
+- **Técnico:** no `pgsty/silo` fixado, `ListParts` e um segundo `CompleteMultipartUpload` falham com `NoSuchUpload` (404), igual a um id inventado; só o `HeadObject` distingue "já finalizado" de "nunca existiu". A tradução fica no módulo de storage (`isNoSuchUpload`), então o `VideosService` não importa tipo S3. O `QueueModule` entrou no `VideosModule` antes de qualquer lógica nova, com as suítes rodadas, para isolar a causa de uma eventual quebra.
+
+### L-23. A Hipótese do plano falhou como escrita e foi ajustada, não escondida (SI-03.12)
+- **Simples:** o critério "arquivo de ~50 MB lendo menos de 25%" deu 54%, depois 25,74%. O custo não cresce com o tamanho do arquivo.
+- **Técnico:** 54% veio de um clipe de ruído com keyframe a cada 10 s (padrão do x264); com keyframe a 2 s e 48,7 MiB deu 25,74%. O volume absoluto foi o mesmo (~13 MB) em 48,7 MiB e em 96,3 MiB (13,01%): ~4 MiB por partida da ferramenta (cabeça + cauda + readahead) mais o seek. O spec passou a usar fixture de ~100 MB e manteve o limite de 25%; a divergência está no `progress.md`.
+
+### L-24. Saída de ferramenta externa pode carregar segredo: redigir antes de gravar (SI-03.13)
+- **Simples:** a mensagem de erro do `ffprobe` trazia a URL pré-assinada inteira (credencial e assinatura), e o `failure_reason` é gravado e mostrado ao dono.
+- **Técnico:** `redactToolOutput` troca o input por `[input]` e qualquer outra URL por `[url]` antes de classificar o erro; os specs deixaram de usar `console.log` e passaram a afirmar que a mensagem não contém `X-Amz-` nem `http`, inclusive nas duas suítes do worker.
+
+### L-25. O evento `failed` do BullMQ dispara a cada tentativa, não só na última (SI-03.13)
+- **Simples:** marcar o vídeo como `failed` no primeiro erro apagaria o retry.
+- **Técnico:** conferido no `bullmq@6.3.17` instalado: `handleFailed` faz `moveToFailed` (que incrementa `attemptsMade`) e só então emite `failed`. O listener marca `failed` se o erro é `UnrecoverableError` ou `job.attemptsMade >= opts.attempts`. Lacuna registrada: job que estoura `maxStalledCount` é falhado pela própria fila e não passa por esse listener, então o vídeo ficaria em `processing`; um `QueueEventsListener` fecharia isso (não feito).
+
+### L-26. `npm run` como PID 1 engole o SIGTERM do `docker compose stop` (SI-03.14)
+- **Simples:** o worker precisa parar limpo; com `npm run start:worker` o processo morreu antes de rodar o shutdown.
+- **Técnico:** medido: com `npm run`, `npm error signal SIGTERM`, exit 1 e nenhum `Worker closed`; com `node -r ts-node/register -r tsconfig-paths/register src/worker.ts` como PID 1, exit 0, 0,9 s e `Worker closed` no log. O `compose.yaml` usa a forma exec e comenta o motivo; os scripts npm ficam para uso manual. O teste de que a API não consome precisou de um `WorkerModule` real como controle positivo, porque o contêiner `nestjs-api` só fica em `tail -f /dev/null` e não prova nada.
+
+### L-27. Mudar o guard global: testar a regressão de quem não optou (SI-03.15)
+- **Simples:** o risco do `@OptionalAuth()` não é a rota nova, é uma rota antiga começar a devolver 401.
+- **Técnico:** o mock do `Reflector` devolvia um valor único para as duas chaves e faria o teste passar pelo motivo errado; passou a responder por chave. Rotas `@Public()` sem o opt-in seguem ignorando qualquer `Authorization` (teste de unidade e e2e com `Bearer` lixo em `GET /` e `POST /auth/forgot-password`). Na rota opcional só a ausência do header é anônima; `Basic …`, header sem esquema e `Bearer ` vazio dão 401. A resposta do `GET /videos/:id` é allowlist campo a campo, comparada por `Object.keys` com as 17 chaves do contrato.
+
+### L-28. Ferramentas do host e do container divergem (SI-03.15)
+- **Simples:** o `npx prettier` rodado no host baixou outra versão do que o projeto usa.
+- **Técnico:** regra a partir da SI-03.16: `docker compose exec -T nestjs-api npx prettier --write <arquivos>`. O lint no container passou, então a SI-03.15 não precisou ser refeita. Antes disso: Python `open()` sem `newline=''` gravou CRLF num arquivo LF (SI-03.9) e `npx prettier --write src` sem filtro reformatou `.hbs` (SI-03.6).

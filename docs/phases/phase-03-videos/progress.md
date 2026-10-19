@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 15/20 completed
+**SIs:** 16/20 completed
 
 ### SI-03.1 — Make the migrations integration spec repeatable
 - **Status:** completed
@@ -175,9 +175,14 @@
   - Not committed.
 
 ### SI-03.16 — Endpoint GET /videos/:id/stream
-- **Status:** pending
-- **Tests:** -
-- **Observations:** none
+- **Status:** completed
+- **Tests:** new: `videos.service.spec.ts` +10 (`getStreamUrl`: owner of `processing`, `ready` and `failed` gets a URL signed with `client: 'public'` and `expiresIn` from the config; owner of a `draft` gets `FileNotAvailableException`; another user and an anonymous caller get a URL only for `ready` and `VideoNotFoundException` for the rest, a draft included; `presignGet` is not called on any 404 or 409 path), `videos.service.integration-spec.ts` +4 (real database and storage), `test/videos-stream.e2e-spec.ts` 10 (authored from `specs/videos-stream.plan.md`, plus another user streaming a `ready` video, a non-uuid id and an unknown id); full suite 42 suites / 399 tests passing (386 + 13); e2e 9 suites / 119 tests passing with `--runInBand` (109 + 10); `tsc --noEmit` exit 0; `npm run lint` exit 0 (0 errors, 1 warning, unchanged); `npm run build` succeeds; Jest exits on its own
+- **Observations:**
+  - Advisor consulted before implementing. Applied: (1) `getStreamUrl` calls `getVisibleVideo` first and only then maps `draft` to 409, so a stranger never sees a 409 that would reveal a draft (unit matrix covers it); (2) the unit asserts `presignGet(storage_key, { client: 'public', expiresIn })` because in the test config the public and internal endpoints are both `http://storage:9000`, so swapping to the internal client would pass the integration and e2e; (3) the Range check is stronger than the spec: a 1,000-byte object with a non-zero repeating pattern is written with `StorageService.putObject` into the own bucket `streamtube-test-e2e-stream`, then `fetch(url, { headers: { Range: 'bytes=0-99' } })` with no `Authorization` must answer `206`, `Content-Range` exactly `bytes 0-99/1000` and the first 100 bytes of the buffer (same in the integration spec); (4) `PresignedUrlResponseDto` has only `url` and `expires_in` (`filename` belongs to SI-03.17) and the controller builds the object field by field; (5) the new code `VIDEO_FILE_NOT_AVAILABLE` is not enumerated in any other spec (grep checked).
+  - `FileNotAvailableException` (`VIDEO_FILE_NOT_AVAILABLE`, 409) added to `domain.exception.ts`. `expires_in` is `PRESIGN_GET_EXPIRES_SECONDS` (default 900). The returned URL is signed for `S3_PUBLIC_ENDPOINT` and carries no authentication of its own: anyone holding it can read the file until it expires.
+  - **Edge recorded, not coded:** a video that went `failed` because its object is gone (`headObject` null in SI-03.13) answers `200` to its owner with a URL that storage then answers `404`. The plan maps only `draft` to 409; a `HeadObject` per request would be outside the plan and costs a storage call on every stream. Left as is.
+  - Process: the formatter now runs inside the container (`docker compose exec -T nestjs-api npx prettier --write <files>`), not on the host (the host `npx` downloaded another Prettier version in SI-03.15; the lint run in the container had passed, so SI-03.15 is fine).
+  - Not committed.
 
 ### SI-03.17 — Endpoint GET /videos/:id/download
 - **Status:** pending
@@ -201,4 +206,4 @@
 
 ---
 
-Retomar: leia a memória projeto-streamtube-fase03-ambiente, docs/phases/phase-03-videos/progress.md e licoes.md (L-20). Próximo passo: commitar a SI-03.15 (se pedir) e seguir com a SI-03.16 (GET /videos/:id/stream, advisor antes). Pendente: nada.
+Retomar: leia a memória projeto-streamtube-fase03-ambiente, docs/phases/phase-03-videos/progress.md e licoes.md (L-20). Próximo passo: commitar a SI-03.16 (se pedir) e seguir com a SI-03.17 (GET /videos/:id/download, reutiliza `PresignedUrlResponseDto` + `filename`). Pendente: nada.

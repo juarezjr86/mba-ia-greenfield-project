@@ -5,6 +5,7 @@ import type { Channel } from '../channels/entities/channel.entity';
 import type { ChannelsService } from '../channels/channels.service';
 import {
   ChannelNotFoundException,
+  FileNotAvailableException,
   InvalidPartNumbersException,
   PartUrlsBatchTooLargeException,
   UploadIncompleteException,
@@ -708,5 +709,114 @@ describe('VideosService.getVisibleVideo', () => {
     await service.getVisibleVideo(undefined, 'video-1');
 
     expect(channelsService.findByUserId).not.toHaveBeenCalled();
+  });
+});
+
+describe('VideosService.getStreamUrl', () => {
+  const OWNER_CHANNEL = 'channel-owner';
+  let findOne: jest.Mock;
+  let storageService: { presignGet: jest.Mock };
+  let service: VideosService;
+
+  function videoWith(status: VideoStatus): Video {
+    return {
+      id: 'video-1',
+      channel_id: OWNER_CHANNEL,
+      status,
+      storage_key: 'videos/video-1/original.mp4',
+    } as Video;
+  }
+
+  beforeEach(() => {
+    findOne = jest.fn();
+    storageService = {
+      presignGet: jest.fn().mockResolvedValue('http://storage:9000/signed'),
+    };
+    const channelsService = {
+      findByUserId: jest.fn((userId: string) =>
+        Promise.resolve(
+          userId === 'owner'
+            ? ({ id: OWNER_CHANNEL } as Channel)
+            : ({ id: 'channel-other' } as Channel),
+        ),
+      ),
+    };
+    const dataSource = { getRepository: jest.fn(() => ({ findOne })) };
+    service = new VideosService(
+      dataSource as unknown as DataSource,
+      channelsService as unknown as ChannelsService,
+      storageService as unknown as StorageService,
+      {} as unknown as VideoQueueProducer,
+      config,
+    );
+  });
+
+  it.each([VideoStatus.PROCESSING, VideoStatus.READY, VideoStatus.FAILED])(
+    'gives the owner a URL for a %s video, signed by the public client',
+    async (status) => {
+      const video = videoWith(status);
+      findOne.mockResolvedValue(video);
+
+      const result = await service.getStreamUrl('owner', 'video-1');
+
+      expect(result).toEqual({
+        url: 'http://storage:9000/signed',
+        expires_in: config.presignGetExpiresSeconds,
+      });
+      expect(storageService.presignGet).toHaveBeenCalledWith(
+        video.storage_key,
+        { client: 'public', expiresIn: config.presignGetExpiresSeconds },
+      );
+    },
+  );
+
+  it('answers FileNotAvailableException to the owner of a draft, without presigning', async () => {
+    findOne.mockResolvedValue(videoWith(VideoStatus.DRAFT));
+
+    await expect(
+      service.getStreamUrl('owner', 'video-1'),
+    ).rejects.toBeInstanceOf(FileNotAvailableException);
+    expect(storageService.presignGet).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['another user', 'other'],
+    ['an anonymous caller', undefined],
+  ])('gives %s a URL only for a ready video', async (_label, userId) => {
+    findOne.mockResolvedValue(videoWith(VideoStatus.READY));
+
+    await expect(
+      service.getStreamUrl(userId, 'video-1'),
+    ).resolves.toMatchObject({ url: 'http://storage:9000/signed' });
+  });
+
+  it.each([
+    ['another user', 'other'],
+    ['an anonymous caller', undefined],
+  ])(
+    'hides every non-ready video from %s as 404, a draft included (never 409)',
+    async (_label, userId) => {
+      for (const status of [
+        VideoStatus.DRAFT,
+        VideoStatus.PROCESSING,
+        VideoStatus.FAILED,
+      ]) {
+        findOne.mockResolvedValue(videoWith(status));
+
+        await expect(
+          service.getStreamUrl(userId, 'video-1'),
+        ).rejects.toBeInstanceOf(VideoNotFoundException);
+      }
+      expect(storageService.presignGet).not.toHaveBeenCalled();
+    },
+  );
+
+  it('throws VideoNotFoundException for an unknown video, without presigning', async () => {
+    findOne.mockResolvedValue(null);
+
+    await expect(
+      service.getStreamUrl('owner', 'video-1'),
+    ).rejects.toBeInstanceOf(VideoNotFoundException);
+    expect(storageService.presignGet).not.toHaveBeenCalled();
   });
 });

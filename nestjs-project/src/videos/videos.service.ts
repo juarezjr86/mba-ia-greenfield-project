@@ -4,6 +4,7 @@ import type { ConfigType } from '@nestjs/config';
 import { DataSource, type EntityManager } from 'typeorm';
 import {
   ChannelNotFoundException,
+  FileNotAvailableException,
   InvalidPartNumbersException,
   PartUrlsBatchTooLargeException,
   UploadIncompleteException,
@@ -26,6 +27,7 @@ import type { InitiateUploadDto } from './dto/initiate-upload.dto';
 import type { InitiateUploadResponseDto } from './dto/initiate-upload-response.dto';
 import type { PartUrlsDto } from './dto/part-urls.dto';
 import type { PartUrlsResponseDto } from './dto/part-urls-response.dto';
+import type { PresignedUrlResponseDto } from './dto/presigned-url-response.dto';
 import type { UploadedPartsResponseDto } from './dto/uploaded-parts-response.dto';
 import { Video, VideoStatus } from './entities/video.entity';
 import { computeUploadPlan } from './upload-plan.util';
@@ -218,6 +220,28 @@ export class VideosService {
     }
 
     return { video, isOwner };
+  }
+
+  /**
+   * Short-lived presigned GET URL of the original file, for the player. Access
+   * is decided first by `getVisibleVideo` (a hidden video is 404), so the 409
+   * for a `draft` (no stored object yet) is only ever seen by its owner.
+   */
+  async getStreamUrl(
+    userId: string | undefined,
+    videoId: string,
+  ): Promise<PresignedUrlResponseDto> {
+    const { video } = await this.getVisibleVideo(userId, videoId);
+    if (video.status === VideoStatus.DRAFT) {
+      throw new FileNotAvailableException();
+    }
+
+    const expiresIn = this.config.presignGetExpiresSeconds;
+    const url = await this.storageService.presignGet(video.storage_key, {
+      client: 'public',
+      expiresIn,
+    });
+    return { url, expires_in: expiresIn };
   }
 
   /**
