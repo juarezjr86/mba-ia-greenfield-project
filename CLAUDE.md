@@ -221,7 +221,7 @@ See `docs/diagrams/software-arch.mermaid` for the full diagram. Key containers:
 - **Video Worker** (FFmpeg) → consumes jobs from queue, processes videos, updates DB and storage
 - **Database** (PostgreSQL) → users, channels, videos, comments, likes
 - **Object Storage** (S3-compatible, served by `pgsty/silo` pinned at `RELEASE.2026-10-18T00-00-00Z`, a community fork that replaces MinIO because the official `minio/minio` image is no longer distributed) → video files and thumbnails
-- **Message Queue** (BullMQ on Redis 7.4.11, `noeviction`) → video processing job queue (`video-processing`)
+- **Message Queue** (BullMQ on Redis 7.4.11, `noeviction`, append-only file on the `redis_data` volume) → video processing job queue (`video-processing`)
 - **Email Service** (SMTP) → account confirmation and password recovery
 
 ## Phase 03 — Video upload and processing (implemented)

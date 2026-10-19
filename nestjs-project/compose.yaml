@@ -89,9 +89,20 @@ services:
       - storage_data:/data
 
   # BullMQ backend (phase-03-videos/TD-01). BullMQ requires noeviction.
+  # appendonly + the redis_data volume keep the queue across a restart or a
+  # recreate of the container: without them the jobs vanish and a video already
+  # `processing` has no job left (fsync every second, so up to one second of
+  # writes can still be lost on a crash).
   redis:
     image: redis:7.4.11
-    command: ["redis-server", "--maxmemory-policy", "noeviction"]
+    command:
+      - redis-server
+      - --maxmemory-policy
+      - noeviction
+      - --appendonly
+      - "yes"
+    volumes:
+      - redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -100,3 +111,4 @@ services:
 
 volumes:
   storage_data:
+  redis_data:
