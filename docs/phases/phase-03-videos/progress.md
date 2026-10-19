@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 11/20 completed
+**SIs:** 12/20 completed
 
 ### SI-03.1 — Make the migrations integration spec repeatable
 - **Status:** completed
@@ -121,9 +121,18 @@
   - Not committed.
 
 ### SI-03.12 — Media tools: ffprobe and ffmpeg over a presigned URL
-- **Status:** pending
-- **Tests:** -
-- **Observations:** none
+- **Status:** completed
+- **Tests:** new: `src/media/probe-mapper.spec.ts` 27 (`mapProbe`, `thumbnailOffsetSeconds`, `classifyToolFailure`), `src/media/media-tools.service.integration-spec.ts` 10 (real storage, real `ffprobe`/`ffmpeg`, byte-counting proxy); full suite 36 suites / 301 tests passing (264 + 37); e2e 7 suites / 94 tests passing with `--runInBand` (unchanged); `tsc --noEmit` exit 0; `npm run lint` exit 0 (0 errors, 1 warning, unchanged); `npm run build` succeeds
+- **Observations:**
+  - Files: `src/media/{media-tools.service,probe-mapper,media.errors,media.module}.ts`, test helpers `src/test/media-fixtures.ts` (`generateMp4`, `jpegSize`) and `src/test/range-counting-proxy.ts`. No endpoint, so no advisor call (low risk, nothing irreversible). Tools run through `child_process.spawn` with an argument array (no shell), `SIGKILL` after `MEDIA_TOOL_TIMEOUT_MS`, stdout capped at 32 MiB, stderr keeps its last 8 KiB.
+  - **TD-07 smoke test against the real storage (the Revision's obligation), figures recorded:** the pinned `pgsty/silo` served the SigV4 presigned GET and honored `Range` (all object reads answered `206`). Generated H.264 MP4 without faststart (`moov` at the end), 96.3 MiB (101,010,082 bytes), 80 s, 640x360, keyframe every 2 s: `probe` = 3 ranged GETs, 3,471,402 bytes; `probe` + `extractThumbnail` = 7 GETs, **13,143,211 bytes = 13.01% of the object** (ranges: `bytes=0-`, `bytes=<size-2.8KB>-` for the `moov`, `bytes=48-`, twice because `ffmpeg` re-probes, then `bytes=11055010-` for the seek). The bytes are what the proxy received from storage, so it is an upper bound (open-ended `Range` requests are read ahead into socket buffers until the tool closes the connection). Container layouts other than MP4/H.264 are still not covered (limit already stated in the TD-07 Revision).
+  - **The plan's Hipótese failed as written and was adjusted, not hidden.** AC: "about 50 MB, less than 25%". First run on a 50 MB / 16 s file: 54.2% (a 25 Mb/s noise clip with the x264 default keyframe interval of 250 frames = 10 s, so the seek has to read one very large GOP). With a 2 s keyframe interval (`-g 50`, what encoders and players usually produce) and 48.7 MiB / 40 s: 13,130,306 bytes = **25.74%**, just over the threshold. The absolute volume was the same ~13 MB at 48.7 MiB and at 96.3 MiB (13.01%), so the cost does not scale with file size: it is about 4 MiB per tool start (head + tail + readahead) plus the seek. The spec therefore uses a ~100 MB fixture and keeps the 25% bound; this is the deviation from the plan's "about 50 MB" and it is recorded here. The TD-07 spike figures (0.15% and 0.35% on 2 GB) are consistent: a fixed ~10 MB is 0.5% of 2 GB.
+  - **Hardening not in the plan: `-protocol_whitelist`.** The input is an uploaded file; a playlist inside it could point at a `file:` or `http:` resource. Checked by hand with `ffprobe` 5.1.9: for a remote input, ffmpeg already narrows its default whitelist and refuses a `file:` segment (`Protocol 'file' not on whitelist`), so the explicit list for URLs (`http,https,tcp,tls,crypto`) is redundant on this version and only pins the behavior. For a local path (the TD-07 fallback after `downloadToFile`) the default allows every protocol; the explicit `file,crypto` is what stops the tool from fetching a URL named in a downloaded playlist. Two integration tests cover both directions (a `.ts` segment name is used so the extension check cannot be the reason; the local-input test asserts a recording server received no request).
+  - **Classification recorded from the real tools:** random bytes → `ffprobe: ...: Invalid data found when processing input` → `UnsupportedMediaError`; presigned URL of a missing object → `Server returned 404 Not Found` → `MediaToolError` (retryable); a server that never answers → killed after `MEDIA_TOOL_TIMEOUT_MS` (400 ms in the test) → `MediaToolError`. Patterns that map to `UnsupportedMediaError`: `Invalid data found when processing input`, `moov atom not found`, `Could not find codec parameters`, `Unsupported codec` (the last three are known ffmpeg messages, not reproduced by a test here); anything unrecognized is retryable, as the plan says.
+  - Thumbnail: JPEG 640 px wide (360 px tall for the 16:9 fixture), offset `max(1, 10% of the duration)` and `0` below 1 second (clamp is the plan's Hipótese; a 0.5 s clip yields a thumbnail). It goes through a temporary file as the plan says, removed in a `finally`. `ffmpeg` runs with `-ss` before `-i` (seek through the index).
+  - The proxy listens on `127.0.0.1` of the test process: the tools run in that same container, so it is not a Compose service address (the "never localhost" rule is about other containers).
+  - Fixture cost: the ~100 MB noise MP4 takes about 25 s to generate; that test has a 180 s timeout. Nothing binary is committed (TD-12).
+  - Not committed.
 
 ### SI-03.13 — Video processor: metadata, thumbnail and failure policy
 - **Status:** pending
