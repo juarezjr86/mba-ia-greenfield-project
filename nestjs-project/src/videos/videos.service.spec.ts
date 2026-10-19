@@ -296,3 +296,88 @@ describe('VideosService.createPartUrls', () => {
     expect(storageService.presignUploadPart).not.toHaveBeenCalled();
   });
 });
+
+describe('VideosService.listUploadedParts', () => {
+  let repository: { findOne: jest.Mock };
+  let channelsService: { findByUserId: jest.Mock };
+  let storageService: { listAllParts: jest.Mock };
+  let service: VideosService;
+
+  const draft = (overrides: Partial<Video> = {}): Video =>
+    ({
+      id: 'video-1',
+      channel_id: 'channel-1',
+      status: VideoStatus.DRAFT,
+      storage_key: 'videos/video-1/original.mp4',
+      upload_id: 'upload-1',
+      part_size_bytes: 64 * MIB,
+      part_count: 3,
+      ...overrides,
+    }) as Video;
+
+  beforeEach(() => {
+    repository = { findOne: jest.fn().mockResolvedValue(draft()) };
+    channelsService = {
+      findByUserId: jest.fn().mockResolvedValue({ id: 'channel-1' } as Channel),
+    };
+    storageService = {
+      listAllParts: jest.fn().mockResolvedValue([
+        { partNumber: 1, sizeBytes: 64 * MIB, etag: '"a"' },
+        { partNumber: 2, sizeBytes: 5 * MIB, etag: '"b"' },
+      ]),
+    };
+    service = new VideosService(
+      {
+        getRepository: jest.fn().mockReturnValue(repository),
+      } as unknown as DataSource,
+      channelsService as unknown as ChannelsService,
+      storageService as unknown as StorageService,
+      config,
+    );
+  });
+
+  it('lists the stored parts with the upload plan after the ownership check', async () => {
+    const result = await service.listUploadedParts('user-1', 'video-1');
+
+    expect(storageService.listAllParts).toHaveBeenCalledWith(
+      'videos/video-1/original.mp4',
+      'upload-1',
+    );
+    expect(result).toEqual({
+      part_size_bytes: 64 * MIB,
+      part_count: 3,
+      parts: [
+        { part_number: 1, size_bytes: 64 * MIB, etag: '"a"' },
+        { part_number: 2, size_bytes: 5 * MIB, etag: '"b"' },
+      ],
+    });
+  });
+
+  it('returns an empty list when no part was sent', async () => {
+    storageService.listAllParts.mockResolvedValue([]);
+
+    const result = await service.listUploadedParts('user-1', 'video-1');
+
+    expect(result.parts).toEqual([]);
+  });
+
+  it('throws VideoNotFoundException and skips storage when the video is not the caller one', async () => {
+    repository.findOne.mockResolvedValue(null);
+
+    await expect(
+      service.listUploadedParts('user-1', 'video-1'),
+    ).rejects.toBeInstanceOf(VideoNotFoundException);
+    expect(storageService.listAllParts).not.toHaveBeenCalled();
+  });
+
+  it('throws VideoNotInDraftException and skips storage when the upload was completed', async () => {
+    repository.findOne.mockResolvedValue(
+      draft({ status: VideoStatus.PROCESSING }),
+    );
+
+    await expect(
+      service.listUploadedParts('user-1', 'video-1'),
+    ).rejects.toBeInstanceOf(VideoNotInDraftException);
+    expect(storageService.listAllParts).not.toHaveBeenCalled();
+  });
+});

@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 9/20 completed
+**SIs:** 10/20 completed
 
 ### SI-03.1 — Make the migrations integration spec repeatable
 - **Status:** completed
@@ -99,9 +99,13 @@
   - Not committed.
 
 ### SI-03.10 — Endpoint GET /videos/:id/upload/parts
-- **Status:** pending
-- **Tests:** -
-- **Observations:** none
+- **Status:** completed
+- **Tests:** new: `videos.service.spec.ts` +4 (`listUploadedParts`), `videos.service.integration-spec.ts` +3 (two parts of 64 MiB and 6 MiB sent straight to storage and listed in order with sizes and ETags, empty list, other owner), `test/videos-list-parts.e2e-spec.ts` 7 (authored from `specs/videos-list-parts.plan.md`, plus a malformed-uuid case); full suite 34 suites / 241 tests passing (234 + 7); e2e 6 suites / 82 tests passing with `--runInBand`; `tsc --noEmit` exit 0; `npm run lint` exit 0 (0 errors, 1 warning, unchanged); `npm run build` succeeds
+- **Observations:**
+  - Low-risk SI, advisor not consulted. It reuses `getOwnedDraft` (SI-03.9) and `StorageService.listAllParts` (SI-03.5, already follows `ListParts` pagination and sorts by part number); the service only maps `StoredPart` to the snake_case response and adds `part_size_bytes` and `part_count`.
+  - The ETag is returned as storage gives it (with its quotes) and the tests compare it with the `ETag` header of the direct `PUT`, so what the client keeps from the upload is what the list shows.
+  - The 2-part scenarios use a 70 MiB draft (default 64 MiB part size) and parts of 64 MiB and 6 MiB, so the last part is smaller than the others as in a real upload. The pagination of `ListParts` (1,000 per page) is covered by the SI-03.5 spec, not repeated here. The e2e uses its own bucket `streamtube-test-e2e-list-parts` with `ensureBucket()`.
+  - Not committed.
 
 ### SI-03.11 — Endpoint POST /videos/:id/upload/complete
 - **Status:** pending

@@ -214,4 +214,54 @@ describe('VideosService (integration, real database and storage)', () => {
       ).rejects.toMatchObject({ errorCode: 'VIDEO_NOT_IN_DRAFT' });
     });
   });
+
+  describe('listUploadedParts', () => {
+    it('lists two parts sent straight to storage, in order, with sizes and ETags', async () => {
+      const { userId } = await createUserWithChannel();
+      const { id } = await videosService.initiateUpload(userId, {
+        ...dto,
+        size_bytes: 70 * MIB,
+      });
+      const { urls } = await videosService.createPartUrls(userId, id, {
+        part_numbers: [2, 1],
+      });
+      const sizes: Record<number, number> = { 1: 64 * MIB, 2: 6 * MIB };
+      const etags: Record<number, string | null> = {};
+      for (const { part_number, url } of urls) {
+        const put = await fetch(url, {
+          method: 'PUT',
+          body: new Uint8Array(sizes[part_number]),
+        });
+        expect(put.status).toBe(200);
+        etags[part_number] = put.headers.get('etag');
+      }
+
+      const result = await videosService.listUploadedParts(userId, id);
+
+      expect(result.part_count).toBe(2);
+      expect(result.parts).toEqual([
+        { part_number: 1, size_bytes: sizes[1], etag: etags[1] },
+        { part_number: 2, size_bytes: sizes[2], etag: etags[2] },
+      ]);
+    });
+
+    it('returns an empty list for a fresh draft', async () => {
+      const { userId } = await createUserWithChannel();
+      const { id } = await videosService.initiateUpload(userId, dto);
+
+      const result = await videosService.listUploadedParts(userId, id);
+
+      expect(result.parts).toEqual([]);
+    });
+
+    it('hides the video of another user as VIDEO_NOT_FOUND', async () => {
+      const owner = await createUserWithChannel();
+      const other = await createUserWithChannel();
+      const { id } = await videosService.initiateUpload(owner.userId, dto);
+
+      await expect(
+        videosService.listUploadedParts(other.userId, id),
+      ).rejects.toMatchObject({ errorCode: 'VIDEO_NOT_FOUND' });
+    });
+  });
 });

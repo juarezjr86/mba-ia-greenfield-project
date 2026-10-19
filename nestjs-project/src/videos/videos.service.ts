@@ -17,6 +17,7 @@ import type { InitiateUploadDto } from './dto/initiate-upload.dto';
 import type { InitiateUploadResponseDto } from './dto/initiate-upload-response.dto';
 import type { PartUrlsDto } from './dto/part-urls.dto';
 import type { PartUrlsResponseDto } from './dto/part-urls-response.dto';
+import type { UploadedPartsResponseDto } from './dto/uploaded-parts-response.dto';
 import { Video, VideoStatus } from './entities/video.entity';
 import { computeUploadPlan } from './upload-plan.util';
 import { buildStorageKey, defaultTitle } from './video-naming.util';
@@ -131,6 +132,28 @@ export class VideosService {
     );
 
     return { urls, expires_in: expiresIn };
+  }
+
+  /** Parts storage already holds, so an interrupted client can resume. */
+  async listUploadedParts(
+    userId: string,
+    videoId: string,
+  ): Promise<UploadedPartsResponseDto> {
+    const video = await this.getOwnedDraft(userId, videoId);
+    const parts = await this.storageService.listAllParts(
+      video.storage_key,
+      video.upload_id,
+    );
+
+    return {
+      part_size_bytes: video.part_size_bytes,
+      part_count: video.part_count,
+      parts: parts.map((part) => ({
+        part_number: part.partNumber,
+        size_bytes: part.sizeBytes,
+        etag: part.etag,
+      })),
+    };
   }
 
   /**

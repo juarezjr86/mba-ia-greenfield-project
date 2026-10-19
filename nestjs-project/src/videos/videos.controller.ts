@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Get,
   HttpCode,
   HttpStatus,
   Param,
@@ -23,6 +24,7 @@ import { InitiateUploadResponseDto } from './dto/initiate-upload-response.dto';
 import { InitiateUploadDto } from './dto/initiate-upload.dto';
 import { PartUrlsResponseDto } from './dto/part-urls-response.dto';
 import { PartUrlsDto } from './dto/part-urls.dto';
+import { UploadedPartsResponseDto } from './dto/uploaded-parts-response.dto';
 import { VideosService } from './videos.service';
 
 // Replaces the global 10 requests per minute: a 10 GB upload is thousands of
@@ -124,5 +126,49 @@ export class VideosController {
     @Body() dto: PartUrlsDto,
   ): Promise<PartUrlsResponseDto> {
     return this.videosService.createPartUrls(user.sub, id, dto);
+  }
+
+  @Get(':id/upload/parts')
+  @ApiBearerAuth('access-token')
+  @ApiOperation({
+    summary: 'List the parts already uploaded',
+    description:
+      'Lists the parts storage already holds, ordered by part number, so an interrupted client resumes by sending only the missing ones.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Stored parts (empty when none was sent yet)',
+    type: UploadedPartsResponseDto,
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'The video id is not a uuid',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Missing, invalid or expired access token',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'The video does not exist or belongs to another channel',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 409,
+    description: 'The upload was already completed',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 429,
+    description:
+      'Too many requests: the limit of the videos routes was exceeded (plain throttler body, not the error envelope)',
+  })
+  async listUploadedParts(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<UploadedPartsResponseDto> {
+    return this.videosService.listUploadedParts(user.sub, id);
   }
 }
