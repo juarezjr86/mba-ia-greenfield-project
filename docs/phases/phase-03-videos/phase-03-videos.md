@@ -1003,20 +1003,20 @@ SIs run one at a time, in numeric order (which respects every edge above); none 
 
 ## Deliverables
 
-- [ ] SI-03.1 — Make the migrations integration spec repeatable
-- [ ] SI-03.2 — Repair the Phase 02 lint baseline
-- [ ] SI-03.3 — Compose services for storage and queue, ffmpeg in the image
-- [ ] SI-03.4 — Dependencies, configuration namespaces and env validation
-- [ ] SI-03.5 — Storage module: S3 clients, multipart, presigning and idempotent bucket bootstrap
-- [ ] SI-03.6 — Video entity, migration and test cleanup
-- [ ] SI-03.7 — Video queue producer
-- [ ] SI-03.8 — Endpoint POST /videos (initiate upload)
-- [ ] SI-03.9 — Endpoint POST /videos/:id/upload/part-urls
-- [ ] SI-03.10 — Endpoint GET /videos/:id/upload/parts
-- [ ] SI-03.11 — Endpoint POST /videos/:id/upload/complete
-- [ ] SI-03.12 — Media tools: ffprobe and ffmpeg over a presigned URL
-- [ ] SI-03.13 — Video processor: metadata, thumbnail and failure policy
-- [ ] SI-03.14 — Worker entrypoint and Compose service video-worker
+- [x] SI-03.1 — Make the migrations integration spec repeatable
+- [x] SI-03.2 — Repair the Phase 02 lint baseline
+- [x] SI-03.3 — Compose services for storage and queue, ffmpeg in the image
+- [x] SI-03.4 — Dependencies, configuration namespaces and env validation
+- [x] SI-03.5 — Storage module: S3 clients, multipart, presigning and idempotent bucket bootstrap
+- [x] SI-03.6 — Video entity, migration and test cleanup
+- [x] SI-03.7 — Video queue producer
+- [x] SI-03.8 — Endpoint POST /videos (initiate upload)
+- [x] SI-03.9 — Endpoint POST /videos/:id/upload/part-urls
+- [x] SI-03.10 — Endpoint GET /videos/:id/upload/parts
+- [x] SI-03.11 — Endpoint POST /videos/:id/upload/complete
+- [x] SI-03.12 — Media tools: ffprobe and ffmpeg over a presigned URL
+- [x] SI-03.13 — Video processor: metadata, thumbnail and failure policy
+- [x] SI-03.14 — Worker entrypoint and Compose service video-worker
 - [x] SI-03.15 — Endpoint GET /videos/:id (with optional authentication)
 - [x] SI-03.16 — Endpoint GET /videos/:id/stream
 - [x] SI-03.17 — Endpoint GET /videos/:id/download
@@ -1026,15 +1026,15 @@ SIs run one at a time, in numeric order (which respects every edge above); none 
 
 **Phase documentation (required by the TD Revisions):**
 
-- [ ] The MinIO → `pgsty/silo` substitution is recorded with the pinned tag in `compose.yaml` and in both `CLAUDE.md` files (`phase-03-videos/TD-03` Revision)
-- [ ] The `S3_PUBLIC_ENDPOINT` exception to the "never `localhost`" rule is documented (`phase-03-videos/TD-04` Revision)
-- [ ] `progress.md` records the manual 10GB sparse-file smoke with API latency during the upload (`phase-03-videos/TD-02` Revision)
-- [ ] Known limitations are stated: abandoned drafts and orphan multipart uploads are not cleaned (follow-up for Phase 04), lifecycle `AbortIncompleteMultipartUpload` not applied, processing validated only for MP4/H.264 up to 2 GB in the spike
+- [x] The MinIO → `pgsty/silo` substitution is recorded with the pinned tag in `compose.yaml` and in both `CLAUDE.md` files (`phase-03-videos/TD-03` Revision)
+- [x] The `S3_PUBLIC_ENDPOINT` exception to the "never `localhost`" rule is documented (`phase-03-videos/TD-04` Revision)
+- [x] `progress.md` records the manual 10GB sparse-file smoke with API latency during the upload (`phase-03-videos/TD-02` Revision)
+- [x] Known limitations are stated: abandoned drafts and orphan multipart uploads are not cleaned (follow-up for Phase 04), lifecycle `AbortIncompleteMultipartUpload` not applied, processing validated only for MP4/H.264 up to 2 GB in the spike
 
 **Full test suites:**
 
-- [ ] Backend tests pass (`cd nestjs-project && docker compose exec nestjs-api npm test -- --runInBand`)
-- [ ] E2E tests pass (`cd nestjs-project && docker compose exec nestjs-api npm run test:e2e -- --runInBand`)
-- [ ] Type check passes (`cd nestjs-project && docker compose exec nestjs-api npx tsc --noEmit`)
-- [ ] Lint passes (`cd nestjs-project && docker compose exec nestjs-api npm run lint`)
-- [ ] Project builds, including the worker entrypoint (`cd nestjs-project && docker compose exec nestjs-api npm run build`)
+- [x] Backend tests pass (`cd nestjs-project && docker compose exec nestjs-api npm test -- --runInBand`)
+- [x] E2E tests pass (`cd nestjs-project && docker compose exec nestjs-api npm run test:e2e -- --runInBand`)
+- [x] Type check passes (`cd nestjs-project && docker compose exec nestjs-api npx tsc --noEmit`)
+- [x] Lint passes (`cd nestjs-project && docker compose exec nestjs-api npm run lint`)
+- [x] Project builds, including the worker entrypoint (`cd nestjs-project && docker compose exec nestjs-api npm run build`)
