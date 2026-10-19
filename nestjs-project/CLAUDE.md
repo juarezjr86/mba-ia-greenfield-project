@@ -34,6 +34,12 @@ docker compose exec nestjs-api npm run start:dev
 Services:
 - `nestjs-api` — NestJS API, port `3000`
 - `db` — PostgreSQL 17, port `5432`, database `streamtube`, user/password `streamtube`
+- `mailpit` — SMTP `1025`, web UI `8025`
+- `storage` — S3-compatible object storage, image `pgsty/silo:RELEASE.2026-10-18T00-00-00Z` (replaces MinIO, whose official image is no longer distributed; the tag is pinned, never `latest`), S3 on `9000`, console on `9001`, volume `storage_data`
+- `redis` — Redis 7.4.11 with `--maxmemory-policy noeviction` (BullMQ requires it), healthcheck `redis-cli ping`
+- `video-worker` — the queue consumer: same image and bind mount as `nestjs-api`, entrypoint `src/worker.ts`, no published port, `stop_grace_period: 60s`. Its command is the exec form of `npm run start:worker` on purpose (under `npm run` the `SIGTERM` of `docker compose stop` ended the process before the shutdown hooks ran)
+
+`ffmpeg` and `ffprobe` are installed by `Dockerfile.dev`. After `docker compose up -d`, create the bucket once with `docker compose exec nestjs-api npm run storage:init` (nothing creates it at application start).
 
 All verification and teardown commands run on the **host machine**:
 
@@ -141,6 +147,83 @@ Whenever possible, prefer storing only the bare address in `.env` and composing 
 ## Build Assets
 
 `tsc` (and therefore `nest build`) only emits compiled `.ts` files to `dist/`. Any non-TypeScript runtime asset — Handlebars templates (`.hbs`), JSON fixtures, static config files, etc. — must be declared in `nest-cli.json` under `compilerOptions.assets` (with `watchAssets: true` for dev). Without that, the file exists in `src/` but is missing in `dist/` and runtime fails only after build.
+
+## Videos, Queue and Worker (Phase 03)
+
+### Modules (`src/`)
+
+| Module | Role |
+|---|---|
+| `videos/` | `VideosController` (8 routes), `VideosService`, `Video` entity (`draft`, `processing`, `ready`, `failed`), response DTOs, `upload-plan.util.ts`, `video-naming.util.ts` |
+| `storage/` | `StorageService` over two AWS SDK v3 S3 clients (`internal` for the API and worker, `public` for URLs handed to users): multipart, presigned PUT/GET, `headObject`, `putObject`, `ensureBucket`; `storage-bootstrap.ts` is the `storage:init` script |
+| `queue/` | `QueueModule` and `VideoQueueProducer`: queue `video-processing`, job `process-video` (`{ videoId }`, job id = video id, so a repeated enqueue is one job) |
+| `media/` | `MediaToolsService`: `ffprobe` and `ffmpeg` through `spawn` over a presigned GET URL, timeout `MEDIA_TOOL_TIMEOUT_MS` |
+| `worker/` | `VideoProcessor` (the `@Processor`), `VideoProcessingService`, `VideoProcessingModule`, `WorkerModule`; `src/worker.ts` is the process entrypoint. The API never runs a Worker: `AppModule` does not import `VideoProcessingModule` |
+| `config/` | namespaces `storage.config.ts`, `queue.config.ts`, `videos.config.ts`, validated in `env.validation.ts`; `root-modules.ts` shares the root config and database between `AppModule` and `WorkerModule` |
+
+Migration: `src/database/migrations/1792365226864-CreateVideos.ts`. Domain errors are in `src/common/exceptions/domain.exception.ts`.
+
+### Endpoints (`VideosController`, `@Controller('videos')`)
+
+| Method and path | Auth | Success |
+|---|---|---|
+| `POST /videos` | owner | `201`, draft + upload plan (`part_size_bytes`, `part_count`) |
+| `POST /videos/:id/upload/part-urls` | owner | `200`, presigned PUT URLs (`part_numbers`, up to `PART_URLS_MAX_BATCH`) |
+| `GET /videos/:id/upload/parts` | owner | `200`, parts already stored (to resume) |
+| `POST /videos/:id/upload/complete` | owner | `202`, `processing`, job enqueued (idempotent) |
+| `GET /videos/:id` | optional | `200`; the owner sees any status, others only `ready` |
+| `GET /videos/:id/stream` | optional | `200` `{ url, expires_in }`; the URL answers `Range` with `206` |
+| `GET /videos/:id/download` | optional | `200` `{ url, expires_in, filename }`; the URL answers `Content-Disposition: attachment` |
+| `GET /videos/:id/thumbnail` | optional | `200` `{ url, expires_in }` (JPEG) |
+
+"Optional" auth is `@Public()` + `@OptionalAuth()`: no token is anonymous, an invalid or expired token is `401`. A video the caller may not see is `404 VIDEO_NOT_FOUND` (a `draft` is never revealed); `409` codes: `VIDEO_NOT_IN_DRAFT`, `UPLOAD_INCOMPLETE`, `VIDEO_ALREADY_PROCESSED`, `VIDEO_FILE_NOT_AVAILABLE`, `THUMBNAIL_NOT_AVAILABLE`; `422 VIDEO_SIZE_MISMATCH`. `VideosController` has its own `@Throttle` (`VIDEOS_THROTTLE_LIMIT` per `VIDEOS_THROTTLE_TTL_MS`, read on each request from `process.env`), replacing the global limit.
+
+### Commands
+
+```bash
+docker compose exec nestjs-api npm run storage:init       # create the bucket and its CORS (idempotent)
+docker compose exec nestjs-api npm run start:worker       # worker by hand (the Compose video-worker already runs it)
+docker compose exec nestjs-api npm run openapi:export     # rewrite openapi.json
+```
+
+`start:worker:prod` runs `node dist/worker`.
+
+### Environment variables (defaults in `src/config/*.config.ts`; keys in `.env.example`)
+
+| Variable | Default |
+|---|---|
+| `S3_ENDPOINT` | `http://storage:9000` |
+| `S3_PUBLIC_ENDPOINT` | `http://localhost:9000` (see below) |
+| `S3_REGION`, `S3_BUCKET` | `us-east-1`, `streamtube` |
+| `S3_ACCESS_KEY`, `S3_SECRET_KEY` | required, no default (Compose also uses them as the storage root credentials) |
+| `S3_CORS_ALLOWED_ORIGINS` | `*` |
+| `REDIS_HOST`, `REDIS_PORT` | `redis`, `6379` |
+| `QUEUE_PREFIX` | `bull` |
+| `VIDEO_JOB_ATTEMPTS`, `VIDEO_JOB_BACKOFF_MS` | `3`, `30000` (exponential) |
+| `UPLOAD_PART_SIZE_BYTES` | `67108864` (Joi range 5242880..2147483647) |
+| `UPLOAD_MAX_SIZE_BYTES` | `10737418240` |
+| `PART_URLS_MAX_BATCH` | `100` |
+| `PRESIGN_PART_EXPIRES_SECONDS`, `PRESIGN_GET_EXPIRES_SECONDS` | `3600`, `900` |
+| `VIDEOS_THROTTLE_LIMIT`, `VIDEOS_THROTTLE_TTL_MS` | `120`, `60000` |
+| `MEDIA_TOOL_TIMEOUT_MS` | `600000` |
+
+**Exception to "never `localhost`":** `S3_PUBLIC_ENDPOINT` is the address of the client outside Docker; presigned URLs are signed for it. A URL signed for `localhost:9000` is unreachable from inside `nestjs-api`, so every test that fetches a presigned URL overrides it with `http://storage:9000` (`createVideosTestApp` and the integration specs do).
+
+### Testing notes
+
+- Suites that boot the queue use a private `QUEUE_PREFIX` and their own bucket (`streamtube-test-*`, created with `ensureBucket()`), so the running `video-worker` (prefix `bull`) never sees their jobs and they never write to the dev bucket. `test/helpers/videos-e2e.ts`: `createVideosTestApp(bucket, { videos, withWorker, configure })`, `registerConfirmedUser`.
+- `withWorker: true` loads `VideoProcessingModule` (never `WorkerModule`, which would add a second root DataSource) so the Worker runs inside the test process.
+- Any test that imports `VideoProcessingModule` needs a private `QUEUE_PREFIX` (the `@Processor` starts a Worker).
+- `npm run test:e2e` must be run with `--runInBand`; Jest has to end on its own (no `--forceExit`).
+
+### Known limits
+
+- Accepted containers (`ACCEPTED_CONTAINERS` in `src/media/probe-mapper.ts`, from `ffprobe`'s `format_name`): MP4 and QuickTime (`mov,mp4,...`), Matroska and WebM (`matroska,webm`). Any other container (AVI, MPEG-TS, ...) ends the video `failed` with `Unsupported container format: <name>`. Only MP4/H.264 was exercised against the real tools (TD-07 spike and tests).
+
+- A `failed` video whose object is missing still gets a stream URL that storage answers `404`; no `HeadObject` per request.
+- Abandoned drafts and their multipart uploads are not cleaned up in this phase (follow-up for Phase 04). The storage lifecycle rule `AbortIncompleteMultipartUpload` is not applied: `pgsty/silo` rejected it in the research spike (OQ-1), so orphan parts stay in the volume until someone removes them.
+- Processing was validated only for MP4/H.264. The metadata spike read a 2.08 GB MP4 with `moov` at the end; the 10 GiB smoke proved the upload path and the API's responsiveness with zero-filled bytes (a file that ends `failed`), so no real video above about 2 GB went through `ffprobe` and `ffmpeg`.
+- `openapi.json` request DTOs have empty `properties`: the Swagger plugin does not run under the `ts-node` export script (response DTOs are complete).
 
 ## Architecture
 

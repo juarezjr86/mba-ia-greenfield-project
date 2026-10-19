@@ -1,4 +1,4 @@
-import { DataSource, EntitySchema, MigrationInterface } from 'typeorm';
+import { DataSource, DataSourceOptions, MigrationInterface } from 'typeorm';
 
 interface TestDataSourceOptions {
   synchronize?: boolean;
@@ -6,7 +6,7 @@ interface TestDataSourceOptions {
 }
 
 export function createTestDataSource(
-  entities: (Function | string | EntitySchema<any>)[],
+  entities: NonNullable<DataSourceOptions['entities']>,
   options: TestDataSourceOptions = {},
 ): DataSource {
   const { synchronize = true, migrations } = options;
@@ -23,7 +23,20 @@ export function createTestDataSource(
   });
 }
 
+export async function dropAllEnumTypes(dataSource: DataSource): Promise<void> {
+  const enums = await dataSource.query<{ typname: string }[]>(
+    `SELECT t.typname
+     FROM pg_type t
+     JOIN pg_namespace n ON n.oid = t.typnamespace
+     WHERE t.typtype = 'e' AND n.nspname = 'public'`,
+  );
+  for (const { typname } of enums) {
+    await dataSource.query(`DROP TYPE IF EXISTS "public"."${typname}" CASCADE`);
+  }
+}
+
 export async function cleanAllTables(dataSource: DataSource): Promise<void> {
+  await dataSource.query('DELETE FROM "videos"');
   await dataSource.query('DELETE FROM "refresh_tokens"');
   await dataSource.query('DELETE FROM "verification_tokens"');
   await dataSource.query('DELETE FROM "channels"');

@@ -21,4 +21,30 @@ export const envValidationSchema = Joi.object({
   MAIL_PORT: Joi.number().default(1025),
   MAIL_FROM: Joi.string().default('"StreamTube" <noreply@streamtube.com>'),
   SWAGGER_ENABLED: Joi.string().valid('true', 'false').default('false'),
+  S3_ENDPOINT: Joi.string().uri().default('http://storage:9000'),
+  S3_PUBLIC_ENDPOINT: Joi.string().uri().default('http://localhost:9000'),
+  S3_REGION: Joi.string().default('us-east-1'),
+  S3_BUCKET: Joi.string().default('streamtube'),
+  S3_ACCESS_KEY: Joi.string().required(),
+  S3_SECRET_KEY: Joi.string().required(),
+  S3_CORS_ALLOWED_ORIGINS: Joi.string().default('*'),
+  REDIS_HOST: Joi.string().default('redis'),
+  REDIS_PORT: Joi.number().port().default(6379),
+  QUEUE_PREFIX: Joi.string().default('bull'),
+  VIDEO_JOB_ATTEMPTS: Joi.number().integer().min(1).default(3),
+  VIDEO_JOB_BACKOFF_MS: Joi.number().integer().min(0).default(30000),
+  // 5 MiB is the S3 minimum part size; 2147483647 is the largest value the
+  // integer column `part_size_bytes` holds.
+  UPLOAD_PART_SIZE_BYTES: Joi.number()
+    .integer()
+    .min(5242880)
+    .max(2147483647)
+    .default(67108864),
+  UPLOAD_MAX_SIZE_BYTES: Joi.number().integer().min(1).default(10737418240),
+  PART_URLS_MAX_BATCH: Joi.number().integer().min(1).default(100),
+  PRESIGN_PART_EXPIRES_SECONDS: Joi.number().integer().min(1).default(3600),
+  PRESIGN_GET_EXPIRES_SECONDS: Joi.number().integer().min(1).default(900),
+  VIDEOS_THROTTLE_LIMIT: Joi.number().integer().min(1).default(120),
+  VIDEOS_THROTTLE_TTL_MS: Joi.number().integer().min(1).default(60000),
+  MEDIA_TOOL_TIMEOUT_MS: Joi.number().integer().min(1).default(600000),
 });

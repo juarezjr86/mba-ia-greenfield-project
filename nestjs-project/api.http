@@ -118,3 +118,66 @@ Content-Type: {{contentType}}
   "token": "{{resetToken}}",
   "new_password": "new-password123"
 }
+
+
+###
+# ─────────────────────────────────────────────
+# VÍDEOS (Fase 03)
+# Fluxo: iniciar upload → URLs das partes → PUT de cada parte direto no
+# storage (o arquivo nunca passa pela API) → completar → aguardar `ready`
+# ─────────────────────────────────────────────
+
+# ID do vídeo devolvido pelo passo 1
+@videoId = {{createVideo.response.body.$.id}}
+
+### 7. Iniciar upload — cria o rascunho e devolve o plano de partes
+# @name createVideo
+POST {{baseUrl}}/videos
+Content-Type: {{contentType}}
+Authorization: Bearer {{accessToken}}
+
+{
+  "filename": "aula.mp4",
+  "size_bytes": 10485760,
+  "content_type": "video/mp4",
+  "title": "Minha aula"
+}
+
+
+### 8. URLs pré-assinadas das partes (até 100 por chamada)
+# Cada URL recebe um PUT com os bytes da parte, direto no storage:
+# curl -X PUT --data-binary @parte-1.bin "<url>"   (guarde o ETag do response)
+POST {{baseUrl}}/videos/{{videoId}}/upload/part-urls
+Content-Type: {{contentType}}
+Authorization: Bearer {{accessToken}}
+
+{
+  "part_numbers": [1, 2]
+}
+
+
+### 9. Partes já enviadas (para retomar um upload interrompido)
+GET {{baseUrl}}/videos/{{videoId}}/upload/parts
+Authorization: Bearer {{accessToken}}
+
+
+### 10. Completar o upload — finaliza no storage e enfileira o processamento
+POST {{baseUrl}}/videos/{{videoId}}/upload/complete
+Authorization: Bearer {{accessToken}}
+
+
+### 11. Consultar o vídeo (autenticação opcional; sem token só `ready`)
+GET {{baseUrl}}/videos/{{videoId}}
+Authorization: Bearer {{accessToken}}
+
+
+### 12. URL de streaming (o player lê direto do storage; responde Range com 206)
+GET {{baseUrl}}/videos/{{videoId}}/stream
+
+
+### 13. URL de download (Content-Disposition: attachment com o nome original)
+GET {{baseUrl}}/videos/{{videoId}}/download
+
+
+### 14. URL da miniatura (JPEG)
+GET {{baseUrl}}/videos/{{videoId}}/thumbnail
