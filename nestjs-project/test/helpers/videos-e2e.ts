@@ -12,6 +12,7 @@ import queueConfig from '../../src/config/queue.config';
 import storageConfig from '../../src/config/storage.config';
 import videosConfig from '../../src/config/videos.config';
 import { MailService } from '../../src/mail/mail.service';
+import { VideoProcessingModule } from '../../src/worker/video-processing.module';
 
 /** Typed access to a supertest response body (it is `any`). */
 export function bodyOf<T = Record<string, unknown>>(res: { body: unknown }): T {
@@ -21,6 +22,14 @@ export function bodyOf<T = Record<string, unknown>>(res: { body: unknown }): T {
 export interface VideosTestAppOptions {
   /** Replaces fields of `videosConfig` (e.g. a small upload part size). */
   videos?: Partial<ConfigType<typeof videosConfig>>;
+  /**
+   * Also loads `VideoProcessingModule`, so the `@Processor` Worker runs in the
+   * test process on the same private queue prefix (never `WorkerModule`, which
+   * would add a second root DataSource).
+   */
+  withWorker?: boolean;
+  /** Runs on the application before `init()`, e.g. to install a middleware. */
+  configure?: (app: INestApplication<App>) => void;
 }
 
 /**
@@ -35,7 +44,10 @@ export async function createVideosTestApp(
   options: VideosTestAppOptions = {},
 ): Promise<INestApplication<App>> {
   const moduleFixture = await Test.createTestingModule({
-    imports: [AppModule],
+    imports: [
+      AppModule,
+      ...(options.withWorker ? [VideoProcessingModule] : []),
+    ],
   })
     .overrideProvider(storageConfig.KEY)
     .useValue({
@@ -61,6 +73,7 @@ export async function createVideosTestApp(
     new DomainExceptionFilter(),
     new ValidationExceptionFilter(),
   );
+  options.configure?.(app);
   await app.init();
   return app;
 }

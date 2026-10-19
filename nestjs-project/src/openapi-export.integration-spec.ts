@@ -128,4 +128,103 @@ describe('exportSpec (integration)', () => {
       }
     }
   });
+
+  describe('videos operations', () => {
+    type Operation = { responses: Record<string, Record<string, unknown>> };
+    const VIDEO_OPERATIONS = [
+      { method: 'post', path: '/videos' },
+      { method: 'get', path: '/videos/{id}' },
+      { method: 'post', path: '/videos/{id}/upload/part-urls' },
+      { method: 'get', path: '/videos/{id}/upload/parts' },
+      { method: 'post', path: '/videos/{id}/upload/complete' },
+      { method: 'get', path: '/videos/{id}/stream' },
+      { method: 'get', path: '/videos/{id}/download' },
+      { method: 'get', path: '/videos/{id}/thumbnail' },
+    ];
+    const envelopeRef = '#/components/schemas/ApiErrorEnvelope';
+
+    const operationOf = (
+      doc: Record<string, unknown>,
+      path: string,
+      method: string,
+    ): Operation | undefined =>
+      (doc.paths as Record<string, Record<string, Operation>>)[path]?.[method];
+
+    it('lists the eight operations of the phase', () => {
+      for (const { method, path } of VIDEO_OPERATIONS) {
+        expect(operationOf(document, path, method)).toBeDefined();
+      }
+    });
+
+    it('points every error response at ApiErrorEnvelope, except the plain throttler 429', () => {
+      for (const { method, path } of VIDEO_OPERATIONS) {
+        const operation = operationOf(document, path, method) as Operation;
+        const errorCodes = Object.keys(operation.responses).filter(
+          (code) => Number(code) >= 400 && code !== '429',
+        );
+        expect(errorCodes).toEqual(expect.arrayContaining(['400', '404']));
+        for (const code of errorCodes) {
+          const content = operation.responses[code].content as Record<
+            string,
+            { schema: Record<string, unknown> }
+          >;
+          expect({
+            path,
+            code,
+            ref: content['application/json'].schema['$ref'],
+          }).toEqual({ path, code, ref: envelopeRef });
+        }
+      }
+    });
+
+    it('requires the access token only on the owner routes', () => {
+      const secured = (path: string, method: string): boolean =>
+        Boolean(
+          (operationOf(document, path, method) as Record<string, unknown>)
+            .security,
+        );
+      const ownerRoutes = VIDEO_OPERATIONS.filter(
+        ({ path }) => path === '/videos' || path.includes('/upload/'),
+      );
+      for (const { method, path } of VIDEO_OPERATIONS) {
+        expect({ path, secured: secured(path, method) }).toEqual({
+          path,
+          secured: ownerRoutes.some((route) => route.path === path),
+        });
+      }
+    });
+
+    it('describes the response DTOs with their properties', () => {
+      const schemas = (document.components as Record<string, unknown>)
+        .schemas as Record<string, { properties?: Record<string, unknown> }>;
+      const responseDtos = {
+        InitiateUploadResponseDto: ['id', 'part_size_bytes', 'part_count'],
+        PartUrlsResponseDto: ['urls', 'expires_in'],
+        UploadedPartsResponseDto: ['parts'],
+        CompleteUploadResponseDto: ['id', 'status'],
+        VideoResponseDto: [
+          'id',
+          'status',
+          'original_filename',
+          'failure_reason',
+        ],
+        PresignedUrlResponseDto: ['url', 'expires_in'],
+        DownloadUrlResponseDto: ['url', 'expires_in', 'filename'],
+      };
+      for (const [name, properties] of Object.entries(responseDtos)) {
+        expect(Object.keys(schemas[name]?.properties ?? {})).toEqual(
+          expect.arrayContaining(properties),
+        );
+      }
+    });
+
+    it('is the committed openapi.json that lists the same operations', () => {
+      const committed = JSON.parse(
+        readFileSync(join(process.cwd(), 'openapi.json'), 'utf-8'),
+      ) as Record<string, unknown>;
+      for (const { method, path } of VIDEO_OPERATIONS) {
+        expect(operationOf(committed, path, method)).toBeDefined();
+      }
+    });
+  });
 });
