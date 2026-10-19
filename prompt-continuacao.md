@@ -56,9 +56,9 @@ decidir as lacunas do `progress.md`).
 
 - Assunção: o recorte de commits acima vale até o aluno dizer outro.
 - `BLOQUEANTE` se aparecer: decisão técnica nova (ex.: ampliar os containers aceitos, limpeza de uploads
-  abandonados, `QueueEventsListener` para job estourando `maxStalledCount`), ação irreversível ou externa.
-- Lacunas conhecidas, não codadas (no `progress.md`): job estourando `maxStalledCount` deixa o vídeo em
-  `processing`; vídeo `failed` por objeto sumido responde 200 com URL que dá 404; uploads multipart
+  abandonados), ação irreversível ou externa.
+- Job estourando `maxStalledCount` NÃO é lacuna: termina `failed` (provado, L-32).
+- Lacunas conhecidas, não codadas (no `progress.md`): vídeo `failed` por objeto sumido responde 200 com URL que dá 404; uploads multipart
   abandonados sem limpeza (TD-05); checksum da URL de parte só passa porque o silo o ignora;
   `openapi.json` com DTOs de request vazios (plugin Swagger não roda no script `ts-node`).
 
