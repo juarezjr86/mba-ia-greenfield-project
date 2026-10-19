@@ -1,6 +1,7 @@
 import {
   classifyToolFailure,
   MediaToolError,
+  redactToolOutput,
   UnsupportedMediaError,
 } from './media.errors';
 import { thumbnailOffsetSeconds } from './media-tools.service';
@@ -104,6 +105,28 @@ describe('thumbnailOffsetSeconds', () => {
 
   it.each([0.5, 0, NaN])('clamps to 0 for a duration of %s', (duration) => {
     expect(thumbnailOffsetSeconds(duration)).toBe(0);
+  });
+});
+
+describe('redactToolOutput', () => {
+  const signedUrl =
+    'http://storage:9000/bucket/videos/1/original.mp4?X-Amz-Credential=key%2F2026&X-Amz-Signature=abc123';
+
+  it('replaces the input and any other URL in the tool output', () => {
+    const stderr = `${signedUrl}: Server returned 404 Not Found\nRedirect to https://other.example/x?token=secret`;
+
+    const result = redactToolOutput(stderr, signedUrl);
+
+    expect(result).toBe(
+      '[input]: Server returned 404 Not Found\nRedirect to [url]',
+    );
+    expect(result).not.toContain('X-Amz-');
+  });
+
+  it('replaces a local path used as input', () => {
+    expect(
+      redactToolOutput('/tmp/x/file.mp4: Invalid data', '/tmp/x/file.mp4'),
+    ).toBe('[input]: Invalid data');
   });
 });
 

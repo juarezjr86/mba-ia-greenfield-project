@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 12/20 completed
+**SIs:** 13/20 completed
 
 ### SI-03.1 — Make the migrations integration spec repeatable
 - **Status:** completed
@@ -135,9 +135,19 @@
   - Not committed.
 
 ### SI-03.13 — Video processor: metadata, thumbnail and failure policy
-- **Status:** pending
-- **Tests:** -
-- **Observations:** none
+- **Status:** completed
+- **Tests:** new: `src/worker/video-processing.service.spec.ts` 14, `src/worker/video.processor.spec.ts` 10, `src/worker/video-processing.service.integration-spec.ts` 9 (real database, storage and tools), `src/worker/video.processor.integration-spec.ts` 4 (real Redis with a private prefix, `VIDEO_JOB_ATTEMPTS=2`, backoff 100 ms), `src/media/probe-mapper.spec.ts` +2 (`redactToolOutput`); full suite 40 suites / 340 tests passing (301 + 39); e2e 7 suites / 94 tests passing with `--runInBand` (unchanged); `tsc --noEmit` exit 0; `npm run lint` exit 0 (0 errors, 1 warning, unchanged); `npm run build` succeeds; Jest exits on its own
+- **Observations:**
+  - Advisor consulted before implementing (risk SI). Applied: terminal-failure test in the `failed` listener, try/catch around `markFailed`, redaction of the presigned URL, `await module.init()` in the processor spec, polling the database row instead of the job state, a real connection failure for the fallback test.
+  - **BullMQ semantics confirmed in the installed `bullmq@6.3.17` (`dist/esm/classes`):** `Worker.handleFailed` calls `job.moveToFailed(...)` and only then `emit('failed', job, err, 'active')`, so the event fires after **every** failed attempt, and `moveToFailed` has already done `attemptsMade += 1`. `Job.shouldRetryJob` retries while `attemptsMade + 1 < attempts` and the error is not an `UnrecoverableError` (checked by `instanceof` or `name`). The listener therefore marks the video `failed` when the error is unrecoverable or `job.attemptsMade >= (job.opts.attempts ?? 1)`; the integration spec shows it: `attemptsMade` 2 of 2 for the retryable error, 1 for the corrupt file and the missing object. The listener's `job` can be `undefined` (typed in `WorkerListener.failed`): it only logs. `@OnWorkerEvent('failed')` takes `keyof WorkerListener`; `WorkerHost.process(job, token?)`. A job that was started more than `attempts` times (`getUnrecoverableErrorMessage`) is failed through the same `handleFailed` path as an `UnrecoverableError`.
+  - **Lock settings (the plan asked to confirm):** `Worker` defaults are `lockDuration` 30000, `maxStalledCount` 1, `stalledInterval` 30000; the lock is renewed every `lockDuration / 2` by the worker's event loop. `spawn` and the streamed download keep the loop free, so a job of several minutes keeps its lock and no option is set. Not exercised with a multi-minute job (the figure rests on the type docs and the code read, not on a long run).
+  - **Known gap, recorded not hidden:** a job that stalls past `maxStalledCount` (the worker process died twice mid-job) is failed by the queue itself and is not reported through this `failed` listener (the only `emit('failed'` in `worker.js` is in `handleFailed`), so its video would stay `processing`. A `QueueEventsListener` is the way to close it; not added in this SI. SI-03.14's graceful shutdown makes a normal stop not count as a stall.
+  - **Order in `process(videoId)`:** row missing → `UnrecoverableError`; `ready` → return (no storage call, `updated_at` unchanged, asserted); `draft` → `UnrecoverableError` (the plan did not say; a draft with a job means the upload never completed); `failed` is reprocessed (a manual re-enqueue); `headObject` null → `UnrecoverableError`; then tools over a presigned GET of the internal client, fallback to a downloaded copy only on `MediaToolError` (never on `UnsupportedMediaError`), `putObject` of the JPEG, and one `update` with metadata, `thumbnail_key`, `status = ready`, `failure_reason = null`. The processor maps `UnsupportedMediaError` to `UnrecoverableError(err.message)`. The URL expiry is `2 × MEDIA_TOOL_TIMEOUT_MS + 60 s` so it outlives both tool runs (not `PRESIGN_GET_EXPIRES_SECONDS`, which is for users).
+  - **SI-03.12 fix found here:** the tool messages carried the whole stderr, which includes the presigned URL (credential and signature), and `failure_reason` is stored and shown to the owner by SI-03.15. `MediaToolsService.run` now passes the stderr through `redactToolOutput(stderr, input)` (the input becomes `[input]`, any other URL `[url]`) before classifying. The earlier `console.log` lines of the media integration spec became assertions: the message contains `Invalid data found when processing input` / `Server returned 404 Not Found` and neither `X-Amz-` nor `http`. Both worker integration specs assert that `failure_reason` has no `X-Amz-`.
+  - The fallback test makes `presignGet` return `http://127.0.0.1:1/unreachable.mp4`: a genuine `MediaToolError` from the real tools, then the real tools run on the downloaded copy and give the same `duration_seconds`, `container_format`, `video_codec`, `width`, `height`, `bitrate` and `fps` as the direct run (`ffprobe_metadata` is not compared: its `format.filename` differs). The temporary `video-fallback-*` directory is gone afterwards (asserted).
+  - `VideoProcessingModule` imports `ConfigModule.forFeature(videosConfig)`, `TypeOrmModule.forFeature([Video])`, `StorageModule`, `MediaModule` and `QueueModule`; it has no controller and is not imported by `AppModule` (the `@Processor` starts a Worker wherever it is loaded; SI-03.14's acceptance covers the API not consuming). The service integration spec builds `VideoProcessingService` directly (no `QueueModule`, so no Worker); the processor spec imports the whole module with `QUEUE_PREFIX` private. A type cast `as QueryDeepPartialEntity<Video>` is needed on the `update` because TypeORM's deep-partial type rejects a value for a `jsonb` column.
+  - Shared helper `src/test/create-processing-video.ts` (user, channel and a `processing` video with its file in storage) for the next SIs that need a processed video.
+  - Not committed.
 
 ### SI-03.14 — Worker entrypoint and Compose service video-worker
 - **Status:** pending
@@ -173,3 +183,7 @@
 - **Status:** pending
 - **Tests:** -
 - **Observations:** none
+
+---
+
+Retomar: leia a memória projeto-streamtube-fase03-ambiente, docs/phases/phase-03-videos/progress.md e licoes.md (L-20). Próximo passo: commitar a SI-03.13 (se pedir) e seguir com a SI-03.14. Pendente: nada.

@@ -6,7 +6,11 @@ import { join } from 'node:path';
 import { Inject, Injectable } from '@nestjs/common';
 import type { ConfigType } from '@nestjs/config';
 import videosConfig from '../config/videos.config';
-import { classifyToolFailure, MediaToolError } from './media.errors';
+import {
+  classifyToolFailure,
+  MediaToolError,
+  redactToolOutput,
+} from './media.errors';
 import { mapProbe, type MediaMetadata, type RawProbe } from './probe-mapper';
 
 const THUMBNAIL_WIDTH = 640;
@@ -54,17 +58,21 @@ export class MediaToolsService {
    * reads it with `Range` requests, no local copy) or a local file path.
    */
   async probe(input: string): Promise<MediaMetadata> {
-    const { stdout } = await this.run('ffprobe', [
-      '-v',
-      'error',
-      ...protocolWhitelist(input),
-      '-print_format',
-      'json',
-      '-show_format',
-      '-show_streams',
-      '-i',
+    const { stdout } = await this.run(
+      'ffprobe',
+      [
+        '-v',
+        'error',
+        ...protocolWhitelist(input),
+        '-print_format',
+        'json',
+        '-show_format',
+        '-show_streams',
+        '-i',
+        input,
+      ],
       input,
-    ]);
+    );
 
     let raw: RawProbe;
     try {
@@ -82,21 +90,25 @@ export class MediaToolsService {
   ): Promise<Buffer> {
     const outputPath = join(tmpdir(), `thumbnail-${randomUUID()}.jpg`);
     try {
-      await this.run('ffmpeg', [
-        '-v',
-        'error',
-        ...protocolWhitelist(input),
-        '-ss',
-        String(thumbnailOffsetSeconds(durationSeconds)),
-        '-i',
+      await this.run(
+        'ffmpeg',
+        [
+          '-v',
+          'error',
+          ...protocolWhitelist(input),
+          '-ss',
+          String(thumbnailOffsetSeconds(durationSeconds)),
+          '-i',
+          input,
+          '-frames:v',
+          '1',
+          '-vf',
+          `scale=${THUMBNAIL_WIDTH}:-2`,
+          '-y',
+          outputPath,
+        ],
         input,
-        '-frames:v',
-        '1',
-        '-vf',
-        `scale=${THUMBNAIL_WIDTH}:-2`,
-        '-y',
-        outputPath,
-      ]);
+      );
 
       let image: Buffer;
       try {
@@ -117,6 +129,7 @@ export class MediaToolsService {
   private run(
     command: 'ffprobe' | 'ffmpeg',
     args: string[],
+    input: string,
   ): Promise<ToolOutput> {
     const timeoutMs = this.config.mediaToolTimeoutMs;
 
@@ -161,7 +174,9 @@ export class MediaToolsService {
         if (code === 0) {
           finish(null, { stdout: Buffer.concat(chunks), stderr });
         } else {
-          finish(classifyToolFailure(command, code, stderr));
+          finish(
+            classifyToolFailure(command, code, redactToolOutput(stderr, input)),
+          );
         }
       });
     });

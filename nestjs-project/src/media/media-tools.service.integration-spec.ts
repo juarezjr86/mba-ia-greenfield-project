@@ -169,8 +169,11 @@ describe('MediaToolsService (integration, real storage and tools)', () => {
         .catch((e: unknown) => e);
 
       expect(failure).toBeInstanceOf(MediaToolError);
-      // Recorded from the real tool, for the classification table.
-      console.log(`ffprobe on a missing object: ${(failure as Error).message}`);
+      // The message is stored as failure_reason: no presigned URL in it.
+      const { message } = failure as Error;
+      expect(message).toContain('Server returned 404 Not Found');
+      expect(message).not.toContain('X-Amz-');
+      expect(message).not.toContain('http');
     });
   });
 
@@ -218,8 +221,11 @@ describe('MediaToolsService (integration, real storage and tools)', () => {
 
       expect(failure).toBeInstanceOf(UnsupportedMediaError);
       expect(failure).not.toBeInstanceOf(MediaToolError);
-      // Recorded from the real tool, for the classification table.
-      console.log(`ffprobe on random bytes: ${(failure as Error).message}`);
+      // The message is stored as failure_reason: no presigned URL in it.
+      const { message } = failure as Error;
+      expect(message).toContain('Invalid data found when processing input');
+      expect(message).not.toContain('X-Amz-');
+      expect(message).not.toContain('http');
     });
 
     it('a text file raises UnsupportedMediaError', async () => {

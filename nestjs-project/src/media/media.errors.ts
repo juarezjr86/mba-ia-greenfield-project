@@ -29,6 +29,18 @@ const UNSUPPORTED_MEDIA_PATTERNS: RegExp[] = [
   /Unsupported codec/i,
 ];
 
+/**
+ * Removes the tool input from its own output. The input is a presigned URL
+ * (credential and signature in the query string) or a local path; the message
+ * ends up in `failure_reason`, which is stored and shown to the video owner.
+ */
+export function redactToolOutput(text: string, input: string): string {
+  return text
+    .split(input)
+    .join('[input]')
+    .replace(/https?:\/\/\S+/gi, '[url]');
+}
+
 /** Maps a non-zero exit to the error the retry policy understands. */
 export function classifyToolFailure(
   tool: string,
