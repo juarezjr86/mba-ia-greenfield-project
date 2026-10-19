@@ -1,6 +1,6 @@
 services:
   nestjs-api:
-    build: 
+    build:
       context: .
       dockerfile: Dockerfile.dev
     ports:
@@ -12,6 +12,43 @@ services:
         condition: service_healthy
       mailpit:
         condition: service_started
+      storage:
+        condition: service_started
+      redis:
+        condition: service_healthy
+
+  # Queue consumer (phase-03-videos/TD-06, option C): the same image and bind
+  # mount as the API, started through its own entrypoint (src/worker.ts). It
+  # reads the same .env as the API, publishes no port, and the API never runs
+  # a Worker. The dev command does not use `nest start`: with deleteOutDir a
+  # second compiler would wipe the dist/ the API dev server writes.
+  # The command is the exec form of `npm run start:worker` on purpose: under
+  # `npm run` the SIGTERM of `docker compose stop` ended the process before the
+  # shutdown hooks ran (exit 1, no "Worker closed"); with node as PID 1 it exits
+  # 0 in about a second, after closing the Worker.
+  # stop_grace_period: closing the Worker waits for the active job; a longer
+  # job is killed after this time and recovered by BullMQ's stalled check.
+  video-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    command:
+      - node
+      - -r
+      - ts-node/register
+      - -r
+      - tsconfig-paths/register
+      - src/worker.ts
+    stop_grace_period: 60s
+    volumes:
+      - .:/home/node/app
+    depends_on:
+      db:
+        condition: service_healthy
+      storage:
+        condition: service_started
+      redis:
+        condition: service_healthy
 
   db:
     image: postgres:17
@@ -33,4 +70,33 @@ services:
       - "1025:1025"
       - "8025:8025"
 
+  # S3-compatible object storage (videos and thumbnails).
+  # The official minio/minio image is no longer distributed; pgsty/silo is the
+  # community fork that keeps the S3 protocol and the MINIO_* variables, so it
+  # replaces MinIO here (phase-03-videos/TD-03). The tag is pinned on purpose:
+  # never use `latest`. The root credentials come from S3_ACCESS_KEY and
+  # S3_SECRET_KEY in .env, the same keys the API reads, so they are defined once.
+  storage:
+    image: pgsty/silo:RELEASE.2026-10-18T00-00-00Z
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      - MINIO_ROOT_USER=${S3_ACCESS_KEY:?S3_ACCESS_KEY must be set in .env}
+      - MINIO_ROOT_PASSWORD=${S3_SECRET_KEY:?S3_SECRET_KEY must be set in .env}
+    volumes:
+      - storage_data:/data
 
+  # BullMQ backend (phase-03-videos/TD-01). BullMQ requires noeviction.
+  redis:
+    image: redis:7.4.11
+    command: ["redis-server", "--maxmemory-policy", "noeviction"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  storage_data:
