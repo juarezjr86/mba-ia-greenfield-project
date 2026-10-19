@@ -555,6 +555,168 @@ describe('VideosService (integration, real database, storage and queue)', () => 
     });
   });
 
+  describe('getDownloadUrl', () => {
+    const BODY = Uint8Array.from({ length: 1000 }, (_, i) => (i % 251) + 1);
+
+    async function createVideoWithObject(
+      userId: string,
+      status: VideoStatus,
+      originalFilename: string,
+    ): Promise<Video> {
+      const { id } = await videosService.initiateUpload(userId, dto);
+      const video = await dataSource
+        .getRepository(Video)
+        .findOneByOrFail({ id });
+      await storageService.putObject(video.storage_key, BODY, 'video/mp4');
+      await dataSource
+        .getRepository(Video)
+        .update(id, { status, original_filename: originalFilename });
+      return video;
+    }
+
+    it('returns a URL that storage serves as an attachment with the original name', async () => {
+      const { userId } = await createUserWithChannel();
+      const video = await createVideoWithObject(
+        userId,
+        VideoStatus.READY,
+        'aula.mp4',
+      );
+
+      const { url, expires_in, filename } = await videosService.getDownloadUrl(
+        undefined,
+        video.id,
+      );
+
+      expect(filename).toBe('aula.mp4');
+      expect(expires_in).toBe(testVideosConfig.presignGetExpiresSeconds);
+      const res = await fetch(url, { headers: { Range: 'bytes=0-9' } });
+      const disposition = res.headers.get('content-disposition') ?? '';
+      expect(disposition).toMatch(/^attachment;/);
+      expect(disposition).toContain('filename="aula.mp4"');
+      await res.arrayBuffer();
+    });
+
+    it('keeps an accented name in filename*', async () => {
+      const { userId } = await createUserWithChannel();
+      const video = await createVideoWithObject(
+        userId,
+        VideoStatus.READY,
+        'Vídeo ação.mp4',
+      );
+
+      const { url, filename } = await videosService.getDownloadUrl(
+        undefined,
+        video.id,
+      );
+
+      expect(filename).toBe('Vídeo ação.mp4');
+      const res = await fetch(url, { headers: { Range: 'bytes=0-9' } });
+      const disposition = res.headers.get('content-disposition') ?? '';
+      const encoded = /filename\*=UTF-8''([^;]+)/.exec(disposition)?.[1];
+      expect(encoded).toBeDefined();
+      expect(decodeURIComponent(encoded as string)).toBe('Vídeo ação.mp4');
+      await res.arrayBuffer();
+    });
+
+    it('answers VIDEO_FILE_NOT_AVAILABLE to the owner of a draft', async () => {
+      const { userId } = await createUserWithChannel();
+      const { id } = await videosService.initiateUpload(userId, dto);
+
+      await expect(
+        videosService.getDownloadUrl(userId, id),
+      ).rejects.toMatchObject({ errorCode: 'VIDEO_FILE_NOT_AVAILABLE' });
+    });
+
+    it('hides a processing video from another user as VIDEO_NOT_FOUND', async () => {
+      const owner = await createUserWithChannel();
+      const other = await createUserWithChannel();
+      const video = await createVideoWithObject(
+        owner.userId,
+        VideoStatus.PROCESSING,
+        'aula.mp4',
+      );
+
+      await expect(
+        videosService.getDownloadUrl(other.userId, video.id),
+      ).rejects.toMatchObject({ errorCode: 'VIDEO_NOT_FOUND' });
+    });
+  });
+
+  describe('getThumbnailUrl', () => {
+    // JPEG signature (FF D8 FF) followed by filler: the test checks the bytes storage serves.
+    const JPEG = Uint8Array.from([
+      0xff,
+      0xd8,
+      0xff,
+      0xe0,
+      ...Array.from({ length: 60 }, (_, i) => i),
+    ]);
+
+    async function createVideo(
+      userId: string,
+      status: VideoStatus,
+      withThumbnail: boolean,
+    ): Promise<Video> {
+      const { id } = await videosService.initiateUpload(userId, dto);
+      const thumbnailKey = `videos/${id}/thumbnail.jpg`;
+      if (withThumbnail) {
+        await storageService.putObject(thumbnailKey, JPEG, 'image/jpeg');
+      }
+      await dataSource.getRepository(Video).update(id, {
+        status,
+        thumbnail_key: withThumbnail ? thumbnailKey : null,
+      });
+      return dataSource.getRepository(Video).findOneByOrFail({ id });
+    }
+
+    it('returns a URL that storage serves with the JPEG bytes', async () => {
+      const { userId } = await createUserWithChannel();
+      const video = await createVideo(userId, VideoStatus.READY, true);
+
+      const { url, expires_in } = await videosService.getThumbnailUrl(
+        undefined,
+        video.id,
+      );
+
+      expect(expires_in).toBe(testVideosConfig.presignGetExpiresSeconds);
+      const res = await fetch(url);
+      expect(res.status).toBe(200);
+      expect(new Uint8Array(await res.arrayBuffer())).toEqual(JPEG);
+    });
+
+    it('lets the owner read the thumbnail of a video that is still processing', async () => {
+      const { userId } = await createUserWithChannel();
+      const video = await createVideo(userId, VideoStatus.PROCESSING, true);
+
+      const { url } = await videosService.getThumbnailUrl(userId, video.id);
+
+      expect((await fetch(url)).status).toBe(200);
+    });
+
+    it('answers THUMBNAIL_NOT_AVAILABLE when thumbnail_key is null', async () => {
+      const { userId } = await createUserWithChannel();
+      const video = await createVideo(userId, VideoStatus.READY, false);
+
+      await expect(
+        videosService.getThumbnailUrl(userId, video.id),
+      ).rejects.toMatchObject({ errorCode: 'THUMBNAIL_NOT_AVAILABLE' });
+    });
+
+    it('hides a processing video from another user as VIDEO_NOT_FOUND', async () => {
+      const owner = await createUserWithChannel();
+      const other = await createUserWithChannel();
+      const video = await createVideo(
+        owner.userId,
+        VideoStatus.PROCESSING,
+        true,
+      );
+
+      await expect(
+        videosService.getThumbnailUrl(other.userId, video.id),
+      ).rejects.toMatchObject({ errorCode: 'VIDEO_NOT_FOUND' });
+    });
+  });
+
   describe('getVisibleVideo', () => {
     async function initiateDraft(userId: string): Promise<{ id: string }> {
       return videosService.initiateUpload(userId, dto);

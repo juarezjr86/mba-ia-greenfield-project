@@ -7,6 +7,7 @@ import {
   FileNotAvailableException,
   InvalidPartNumbersException,
   PartUrlsBatchTooLargeException,
+  ThumbnailNotAvailableException,
   UploadIncompleteException,
   UploadSizeExceededException,
   VideoAlreadyProcessedException,
@@ -27,6 +28,7 @@ import type { InitiateUploadDto } from './dto/initiate-upload.dto';
 import type { InitiateUploadResponseDto } from './dto/initiate-upload-response.dto';
 import type { PartUrlsDto } from './dto/part-urls.dto';
 import type { PartUrlsResponseDto } from './dto/part-urls-response.dto';
+import type { DownloadUrlResponseDto } from './dto/download-url-response.dto';
 import type { PresignedUrlResponseDto } from './dto/presigned-url-response.dto';
 import type { UploadedPartsResponseDto } from './dto/uploaded-parts-response.dto';
 import { Video, VideoStatus } from './entities/video.entity';
@@ -231,10 +233,7 @@ export class VideosService {
     userId: string | undefined,
     videoId: string,
   ): Promise<PresignedUrlResponseDto> {
-    const { video } = await this.getVisibleVideo(userId, videoId);
-    if (video.status === VideoStatus.DRAFT) {
-      throw new FileNotAvailableException();
-    }
+    const video = await this.getVideoWithFile(userId, videoId);
 
     const expiresIn = this.config.presignGetExpiresSeconds;
     const url = await this.storageService.presignGet(video.storage_key, {
@@ -242,6 +241,63 @@ export class VideosService {
       expiresIn,
     });
     return { url, expires_in: expiresIn };
+  }
+
+  /**
+   * Same access rule as `getStreamUrl`; the content-disposition is signed into
+   * the URL, so the browser saves the file under `original_filename`.
+   */
+  async getDownloadUrl(
+    userId: string | undefined,
+    videoId: string,
+  ): Promise<DownloadUrlResponseDto> {
+    const video = await this.getVideoWithFile(userId, videoId);
+
+    const expiresIn = this.config.presignGetExpiresSeconds;
+    const url = await this.storageService.presignGet(video.storage_key, {
+      client: 'public',
+      expiresIn,
+      downloadFilename: video.original_filename,
+    });
+    return {
+      url,
+      expires_in: expiresIn,
+      filename: video.original_filename,
+    };
+  }
+
+  /**
+   * Presigned GET URL of the thumbnail the worker stored. Same visibility rule
+   * as the video (`getVisibleVideo`); a visible video without `thumbnail_key`
+   * (not processed yet, or `failed`) is 409.
+   */
+  async getThumbnailUrl(
+    userId: string | undefined,
+    videoId: string,
+  ): Promise<PresignedUrlResponseDto> {
+    const { video } = await this.getVisibleVideo(userId, videoId);
+    if (!video.thumbnail_key) {
+      throw new ThumbnailNotAvailableException();
+    }
+
+    const expiresIn = this.config.presignGetExpiresSeconds;
+    const url = await this.storageService.presignGet(video.thumbnail_key, {
+      client: 'public',
+      expiresIn,
+    });
+    return { url, expires_in: expiresIn };
+  }
+
+  /** Visible video that already has a stored object: a `draft` has none (owner only, 409). */
+  private async getVideoWithFile(
+    userId: string | undefined,
+    videoId: string,
+  ): Promise<Video> {
+    const { video } = await this.getVisibleVideo(userId, videoId);
+    if (video.status === VideoStatus.DRAFT) {
+      throw new FileNotAvailableException();
+    }
+    return video;
   }
 
   /**

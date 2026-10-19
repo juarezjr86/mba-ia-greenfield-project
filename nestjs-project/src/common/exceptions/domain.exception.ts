@@ -113,6 +113,16 @@ export class FileNotAvailableException extends DomainException {
   }
 }
 
+export class ThumbnailNotAvailableException extends DomainException {
+  constructor() {
+    super(
+      'THUMBNAIL_NOT_AVAILABLE',
+      409,
+      'The video has no thumbnail: it was not processed yet, or processing failed',
+    );
+  }
+}
+
 export class InvalidPartNumbersException extends DomainException {
   constructor(partCount: number) {
     super(
