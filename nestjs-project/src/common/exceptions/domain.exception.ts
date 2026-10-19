@@ -64,3 +64,35 @@ export class UploadSizeExceededException extends DomainException {
     );
   }
 }
+
+export class VideoNotFoundException extends DomainException {
+  constructor() {
+    super('VIDEO_NOT_FOUND', 404, 'Video not found');
+  }
+}
+
+export class VideoNotInDraftException extends DomainException {
+  constructor() {
+    super('VIDEO_NOT_IN_DRAFT', 409, 'The video upload was already completed');
+  }
+}
+
+export class InvalidPartNumbersException extends DomainException {
+  constructor(partCount: number) {
+    super(
+      'INVALID_PART_NUMBERS',
+      400,
+      `Part numbers must be between 1 and ${partCount}`,
+    );
+  }
+}
+
+export class PartUrlsBatchTooLargeException extends DomainException {
+  constructor(maxBatch: number) {
+    super(
+      'PART_URLS_BATCH_TOO_LARGE',
+      400,
+      `At most ${maxBatch} part numbers can be requested at once`,
+    );
+  }
+}

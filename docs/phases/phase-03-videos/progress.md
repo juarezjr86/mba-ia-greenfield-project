@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 8/20 completed
+**SIs:** 9/20 completed
 
 ### SI-03.1 — Make the migrations integration spec repeatable
 - **Status:** completed
@@ -88,9 +88,15 @@
   - Not committed.
 
 ### SI-03.9 — Endpoint POST /videos/:id/upload/part-urls
-- **Status:** pending
-- **Tests:** -
-- **Observations:** none
+- **Status:** completed
+- **Tests:** new: `videos.service.spec.ts` +7 (`createPartUrls`), `videos.service.integration-spec.ts` +3 (direct 5 MiB `PUT` answers `ETag`, other owner, left draft), `test/videos-part-urls.e2e-spec.ts` 15 (authored from `specs/videos-part-urls.plan.md`, plus validation cases); full suite 34 suites / 234 tests passing (224 + 10); e2e 5 suites / 75 tests passing with `--runInBand`; `tsc --noEmit` exit 0; `npm run lint` exit 0 (0 errors, 1 warning, unchanged); `npm run build` succeeds
+- **Observations:**
+  - Advisor consulted before implementing (risk SI). Applied: `getOwnedDraft` reuses `ChannelsService.findByUserId` and then `findOne({ id, channel_id })`, so the constructor is unchanged and channel lookups stay in `ChannelsModule`; a user without a channel gets `VIDEO_NOT_FOUND`, not `CHANNEL_NOT_FOUND`. `getOwnedDraft` narrows `upload_id`, `part_size_bytes` and `part_count` once and returns `OwnedDraft`, for SI-03.10 and SI-03.11 to reuse.
+  - **Order of checks (declared, tested at unit and e2e level):** batch size first (no I/O) → ownership and draft status → part numbers against `part_count`. Reason: with the default 64 MiB part a ~128 MiB draft has `part_count` 2, so checking `part_count` first would answer `INVALID_PART_NUMBERS` for 101 numbers and `PART_URLS_BATCH_TOO_LARGE` could never be reached. Consequence: an authenticated caller learns the batch limit error before the 404 for a video that is not theirs; it leaks nothing about the video.
+  - Response field name `urls` comes from the plan's API Contracts (`urls: { part_number, url }[]`, `expires_in`); the AC text alone did not name it. Presigning is local (no network), so `Promise.all` keeps the requested order.
+  - The e2e draft is created with `size_bytes` 70 MiB (default 64 MiB part size → 2 parts, nothing uploaded). Scenario 1.5 moves the row to `processing` with a direct `UPDATE` through the app `DataSource`, because `complete` only exists in SI-03.11. The e2e uses its own bucket `streamtube-test-e2e-part-urls` with `ensureBucket()`.
+  - Mistake caught: a Python rewrite of `videos.service.ts` wrote CRLF into an LF file (whole-file diff); fixed with `sed` and later edits used `newline=''`.
+  - Not committed.
 
 ### SI-03.10 — Endpoint GET /videos/:id/upload/parts
 - **Status:** pending

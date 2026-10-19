@@ -4,16 +4,29 @@ import type { ConfigType } from '@nestjs/config';
 import { DataSource } from 'typeorm';
 import {
   ChannelNotFoundException,
+  InvalidPartNumbersException,
+  PartUrlsBatchTooLargeException,
   UploadSizeExceededException,
+  VideoNotFoundException,
+  VideoNotInDraftException,
 } from '../common/exceptions/domain.exception';
 import { ChannelsService } from '../channels/channels.service';
 import videosConfig from '../config/videos.config';
 import { StorageService } from '../storage/storage.service';
 import type { InitiateUploadDto } from './dto/initiate-upload.dto';
 import type { InitiateUploadResponseDto } from './dto/initiate-upload-response.dto';
+import type { PartUrlsDto } from './dto/part-urls.dto';
+import type { PartUrlsResponseDto } from './dto/part-urls-response.dto';
 import { Video, VideoStatus } from './entities/video.entity';
 import { computeUploadPlan } from './upload-plan.util';
 import { buildStorageKey, defaultTitle } from './video-naming.util';
+
+/** A draft video whose multipart upload fields are known to be set. */
+export type OwnedDraft = Video & {
+  upload_id: string;
+  part_size_bytes: number;
+  part_count: number;
+};
 
 @Injectable()
 export class VideosService {
@@ -84,5 +97,67 @@ export class VideosService {
       part_size_bytes: partSizeBytes,
       part_count: partCount,
     };
+  }
+
+  /**
+   * Presigns the requested parts. Checks run in this order: batch size (no I/O),
+   * ownership and draft status, then the part numbers against `part_count`.
+   */
+  async createPartUrls(
+    userId: string,
+    videoId: string,
+    dto: PartUrlsDto,
+  ): Promise<PartUrlsResponseDto> {
+    if (dto.part_numbers.length > this.config.partUrlsMaxBatch) {
+      throw new PartUrlsBatchTooLargeException(this.config.partUrlsMaxBatch);
+    }
+
+    const video = await this.getOwnedDraft(userId, videoId);
+    if (dto.part_numbers.some((partNumber) => partNumber > video.part_count)) {
+      throw new InvalidPartNumbersException(video.part_count);
+    }
+
+    const expiresIn = this.config.presignPartExpiresSeconds;
+    const urls = await Promise.all(
+      dto.part_numbers.map(async (partNumber) => ({
+        part_number: partNumber,
+        url: await this.storageService.presignUploadPart(
+          video.storage_key,
+          video.upload_id,
+          partNumber,
+          expiresIn,
+        ),
+      })),
+    );
+
+    return { urls, expires_in: expiresIn };
+  }
+
+  /**
+   * Video of the caller's channel that is still a draft. A user without a
+   * channel, another user's video and an unknown id are all `VIDEO_NOT_FOUND`.
+   */
+  async getOwnedDraft(userId: string, videoId: string): Promise<OwnedDraft> {
+    const channel = await this.channelsService.findByUserId(userId);
+    if (!channel) {
+      throw new VideoNotFoundException();
+    }
+
+    const video = await this.dataSource
+      .getRepository(Video)
+      .findOne({ where: { id: videoId, channel_id: channel.id } });
+    if (!video) {
+      throw new VideoNotFoundException();
+    }
+    if (video.status !== VideoStatus.DRAFT) {
+      throw new VideoNotInDraftException();
+    }
+
+    const { upload_id, part_size_bytes, part_count } = video;
+    if (upload_id === null || part_size_bytes === null || part_count === null) {
+      // A draft is saved with its multipart fields in one transaction.
+      throw new Error(`Draft video ${videoId} has no multipart upload`);
+    }
+    return Object.assign(video, { upload_id, part_size_bytes, part_count });
   }
 }

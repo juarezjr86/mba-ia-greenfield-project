@@ -171,4 +171,47 @@ describe('VideosService (integration, real database and storage)', () => {
       videosService.initiateUpload(user.id, dto),
     ).rejects.toMatchObject({ errorCode: 'CHANNEL_NOT_FOUND' });
   });
+
+  describe('createPartUrls', () => {
+    it('returns a URL that accepts a direct 5 MiB PUT and answers with an ETag', async () => {
+      const { userId } = await createUserWithChannel();
+      const { id } = await videosService.initiateUpload(userId, dto);
+
+      const { urls, expires_in } = await videosService.createPartUrls(
+        userId,
+        id,
+        { part_numbers: [1] },
+      );
+
+      expect(expires_in).toBe(3600);
+      const response = await fetch(urls[0].url, {
+        method: 'PUT',
+        body: new Uint8Array(5 * MIB),
+      });
+      expect(response.status).toBe(200);
+      expect(response.headers.get('etag')).toEqual(expect.any(String));
+    });
+
+    it('hides the video of another user as VIDEO_NOT_FOUND', async () => {
+      const owner = await createUserWithChannel();
+      const other = await createUserWithChannel();
+      const { id } = await videosService.initiateUpload(owner.userId, dto);
+
+      await expect(
+        videosService.createPartUrls(other.userId, id, { part_numbers: [1] }),
+      ).rejects.toMatchObject({ errorCode: 'VIDEO_NOT_FOUND' });
+    });
+
+    it('rejects a video that left draft with VIDEO_NOT_IN_DRAFT', async () => {
+      const { userId } = await createUserWithChannel();
+      const { id } = await videosService.initiateUpload(userId, dto);
+      await dataSource
+        .getRepository(Video)
+        .update(id, { status: VideoStatus.PROCESSING });
+
+      await expect(
+        videosService.createPartUrls(userId, id, { part_numbers: [1] }),
+      ).rejects.toMatchObject({ errorCode: 'VIDEO_NOT_IN_DRAFT' });
+    });
+  });
 });

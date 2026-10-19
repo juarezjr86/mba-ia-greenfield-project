@@ -4,7 +4,11 @@ import type { Channel } from '../channels/entities/channel.entity';
 import type { ChannelsService } from '../channels/channels.service';
 import {
   ChannelNotFoundException,
+  InvalidPartNumbersException,
+  PartUrlsBatchTooLargeException,
   UploadSizeExceededException,
+  VideoNotFoundException,
+  VideoNotInDraftException,
 } from '../common/exceptions/domain.exception';
 import type videosConfig from '../config/videos.config';
 import type { StorageService } from '../storage/storage.service';
@@ -169,5 +173,126 @@ describe('VideosService.initiateUpload', () => {
     );
 
     expect(manager.update).not.toHaveBeenCalled();
+  });
+});
+
+describe('VideosService.createPartUrls', () => {
+  let dataSource: { getRepository: jest.Mock };
+  let repository: { findOne: jest.Mock };
+  let channelsService: { findByUserId: jest.Mock };
+  let storageService: { presignUploadPart: jest.Mock };
+  let service: VideosService;
+
+  const draft = (overrides: Partial<Video> = {}): Video =>
+    ({
+      id: 'video-1',
+      channel_id: 'channel-1',
+      status: VideoStatus.DRAFT,
+      storage_key: 'videos/video-1/original.mp4',
+      upload_id: 'upload-1',
+      part_size_bytes: 64 * MIB,
+      part_count: 3,
+      ...overrides,
+    }) as Video;
+
+  beforeEach(() => {
+    repository = { findOne: jest.fn().mockResolvedValue(draft()) };
+    dataSource = { getRepository: jest.fn().mockReturnValue(repository) };
+    channelsService = {
+      findByUserId: jest.fn().mockResolvedValue({ id: 'channel-1' } as Channel),
+    };
+    storageService = {
+      presignUploadPart: jest.fn(
+        (_key: string, _upload: string, part: number) =>
+          Promise.resolve(`https://storage/part-${part}`),
+      ),
+    };
+    service = new VideosService(
+      dataSource as unknown as DataSource,
+      channelsService as unknown as ChannelsService,
+      storageService as unknown as StorageService,
+      config,
+    );
+  });
+
+  it('presigns each requested part in the order requested', async () => {
+    const result = await service.createPartUrls('user-1', 'video-1', {
+      part_numbers: [3, 1],
+    });
+
+    expect(result).toEqual({
+      urls: [
+        { part_number: 3, url: 'https://storage/part-3' },
+        { part_number: 1, url: 'https://storage/part-1' },
+      ],
+      expires_in: 3600,
+    });
+    expect(storageService.presignUploadPart).toHaveBeenCalledWith(
+      'videos/video-1/original.mp4',
+      'upload-1',
+      3,
+      3600,
+    );
+    expect(repository.findOne).toHaveBeenCalledWith({
+      where: { id: 'video-1', channel_id: 'channel-1' },
+    });
+  });
+
+  it('accepts the last part number and a batch of exactly the maximum', async () => {
+    repository.findOne.mockResolvedValue(draft({ part_count: 100 }));
+
+    const result = await service.createPartUrls('user-1', 'video-1', {
+      part_numbers: Array.from({ length: 100 }, (_, i) => i + 1),
+    });
+
+    expect(result.urls).toHaveLength(100);
+  });
+
+  it('throws VideoNotFoundException when the video is not in the caller channel', async () => {
+    repository.findOne.mockResolvedValue(null);
+
+    await expect(
+      service.createPartUrls('user-1', 'video-1', { part_numbers: [1] }),
+    ).rejects.toBeInstanceOf(VideoNotFoundException);
+    expect(storageService.presignUploadPart).not.toHaveBeenCalled();
+  });
+
+  it('throws VideoNotFoundException, not CHANNEL_NOT_FOUND, for a user without a channel', async () => {
+    channelsService.findByUserId.mockResolvedValue(null);
+
+    await expect(
+      service.createPartUrls('user-1', 'video-1', { part_numbers: [1] }),
+    ).rejects.toBeInstanceOf(VideoNotFoundException);
+    expect(repository.findOne).not.toHaveBeenCalled();
+  });
+
+  it('throws VideoNotInDraftException when the upload was completed', async () => {
+    repository.findOne.mockResolvedValue(
+      draft({ status: VideoStatus.PROCESSING }),
+    );
+
+    await expect(
+      service.createPartUrls('user-1', 'video-1', { part_numbers: [1] }),
+    ).rejects.toBeInstanceOf(VideoNotInDraftException);
+    expect(storageService.presignUploadPart).not.toHaveBeenCalled();
+  });
+
+  it('throws InvalidPartNumbersException for a part number above part_count', async () => {
+    await expect(
+      service.createPartUrls('user-1', 'video-1', { part_numbers: [1, 4] }),
+    ).rejects.toBeInstanceOf(InvalidPartNumbersException);
+    expect(storageService.presignUploadPart).not.toHaveBeenCalled();
+  });
+
+  it('checks the batch size first, with no database or storage call', async () => {
+    await expect(
+      service.createPartUrls('user-1', 'video-1', {
+        part_numbers: Array.from({ length: 101 }, (_, i) => i + 1),
+      }),
+    ).rejects.toBeInstanceOf(PartUrlsBatchTooLargeException);
+
+    expect(channelsService.findByUserId).not.toHaveBeenCalled();
+    expect(repository.findOne).not.toHaveBeenCalled();
+    expect(storageService.presignUploadPart).not.toHaveBeenCalled();
   });
 });
