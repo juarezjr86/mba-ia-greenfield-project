@@ -48,9 +48,11 @@ export class VideoProcessor extends WorkerHost {
    * already been incremented (the same test `Job.shouldRetryJob` applies). The
    * video becomes `failed` only when no retry is left.
    *
-   * Known gap: a job that stalls past `maxStalledCount` (the worker process
-   * died twice) is failed by the queue without reaching this listener, so its
-   * video would stay `processing`.
+   * A job that stalls past `maxStalledCount` (the worker process died too many
+   * times) also reaches this listener: BullMQ 6 sends it back to the queue
+   * marked with a deferred failure, and the next Worker to take it fails it
+   * with an `UnrecoverableError` (`worker.js`, `getUnrecoverableErrorMessage`).
+   * Proved by `video.processor.integration-spec.ts`.
    */
   @OnWorkerEvent('failed')
   async onFailed(
