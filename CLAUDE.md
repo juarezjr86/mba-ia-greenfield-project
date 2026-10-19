@@ -154,9 +154,10 @@ O object storage **não** é escolha: S3-compatível, MinIO local em Docker; dec
 
 Só depois de a fase implementada, a partir do **código real**: seção de vídeos (módulo,
 endpoints, fila/worker, storage, serviços do Compose, variáveis de ambiente). Atualizar os
-dois arquivos (raiz e `nestjs-project/`). Ao fazê-lo, conferir pendências upstream
-observadas em 2026-10-10: a raiz ainda diz "Message Queue (TBD)" e "`next-frontend/` — not
-yet initialized" (o diretório existe); corrigir só o que o código sustenta.
+dois arquivos (raiz e `nestjs-project/`). Ao fazê-lo, conferir as pendências upstream
+observadas em 2026-10-10 (fila ainda marcada como não decidida e `next-frontend/` marcado
+como não inicializado, embora o diretório exista); corrigir só o que o código sustenta.
+Feito na SI-03.20 (2026-10-19): ambas as linhas corrigidas e a seção de vídeos escrita.
 
 ## Exceção ao global
 
@@ -209,7 +210,7 @@ This is a monorepo with two main areas:
 
 - `nestjs-project/` — Backend API (NestJS 11, TypeScript, Express). Contains modules for users, channels, videos, comments, etc.
 - `docs/` — Project documentation, architecture diagrams, and planning.
-- `next-frontend/` (Next.js) — not yet initialized
+- `next-frontend/` — Next.js app (initialized, with its own `CLAUDE.md` and `compose.yaml`); outside the scope of Phase 03.
 
 ## Architecture (C4 Container Diagram)
 
@@ -219,9 +220,17 @@ See `docs/diagrams/software-arch.mermaid` for the full diagram. Key containers:
 - **API** (Nest.js) → business rules, auth, reads/writes DB, uploads to storage, publishes jobs to queue, sends emails
 - **Video Worker** (FFmpeg) → consumes jobs from queue, processes videos, updates DB and storage
 - **Database** (PostgreSQL) → users, channels, videos, comments, likes
-- **Object Storage** (S3/MinIO) → video files and thumbnails
-- **Message Queue** (TBD) → video processing job queue
+- **Object Storage** (S3-compatible, served by `pgsty/silo` pinned at `RELEASE.2026-10-18T00-00-00Z`, a community fork that replaces MinIO because the official `minio/minio` image is no longer distributed) → video files and thumbnails
+- **Message Queue** (BullMQ on Redis 7.4.11, `noeviction`) → video processing job queue (`video-processing`)
 - **Email Service** (SMTP) → account confirmation and password recovery
+
+## Phase 03 — Video upload and processing (implemented)
+
+Endpoints, environment variables and commands: [nestjs-project/CLAUDE.md](nestjs-project/CLAUDE.md) → "Videos, Queue and Worker". Plan and progress: `docs/phases/phase-03-videos/`.
+
+- **Compose services** (`nestjs-project/compose.yaml`): `nestjs-api`, `video-worker` (same image, entrypoint `src/worker.ts`, no published port), `db`, `mailpit`, `storage` (`pgsty/silo`; port 9000 S3, 9001 console), `redis`. `ffmpeg` and `ffprobe` come from `nestjs-project/Dockerfile.dev`.
+- **Flow:** the file never passes through the API. `POST /videos` creates a `draft` and starts a multipart upload; the client sends each part straight to a presigned storage URL; `POST /videos/:id/upload/complete` finalizes it and enqueues a `process-video` job; the worker extracts metadata and a JPEG thumbnail and moves the video to `ready` (or `failed`).
+- **Playback:** `stream`, `download` and `thumbnail` return JSON with a short-lived presigned GET URL; storage answers `Range` with `206`.
 
 ## Docker Networking
 
@@ -233,6 +242,8 @@ Inside a container, `localhost` refers to the container itself, not the host mac
 - **Wrong:** `DB_HOST=localhost`
 
 This applies to all environment variables, configuration files, and code that references service hosts.
+
+**One exception:** `S3_PUBLIC_ENDPOINT` (`http://localhost:9000` in the example environment file). Presigned URLs are signed for the address the client outside Docker (browser, `curl` on the host) reaches, so it is the only host that is not a Compose service name. Every service-to-service address (`S3_ENDPOINT=http://storage:9000`, `REDIS_HOST=redis`, `DB_HOST=db`) keeps the service name. Tests that fetch a presigned URL from inside the `nestjs-api` container override it with `http://storage:9000`.
 
 ## Working Principles
 
