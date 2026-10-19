@@ -202,3 +202,15 @@
 ### L-28. Ferramentas do host e do container divergem (SI-03.15)
 - **Simples:** o `npx prettier` rodado no host baixou outra versão do que o projeto usa.
 - **Técnico:** regra a partir da SI-03.16: `docker compose exec -T nestjs-api npx prettier --write <arquivos>`. O lint no container passou, então a SI-03.15 não precisou ser refeita. Antes disso: Python `open()` sem `newline=''` gravou CRLF num arquivo LF (SI-03.9) e `npx prettier --write src` sem filtro reformatou `.hbs` (SI-03.6).
+
+### L-29. Sem a tool `advisor`, o revisor independente vira um agente Opus somente leitura via `Workflow` (SI-03.19)
+- **Simples:** a revisão antes da SI de risco não pode ser pulada só porque a ferramenta não existe na sessão; e cada crítica precisa ser conferida na fonte antes de valer.
+- **Técnico:** o briefing levou o bloco do plano, os caminhos do código e o desenho proposto, com pedido de refutação. Das 11 críticas, as que mudaram o trabalho: o 404 de "vídeo não pronto" correria contra o Worker no mesmo processo (usar um rascunho nunca completado); o `@Throttle` lê `videosConfig()` de `process.env` a cada requisição, então a sobrescrita do provider não o altera; a asserção de envelope de erro precisa excluir o 429 (sem schema de propósito); o spec de OpenAPI só escreve em `tmpdir`, então o `openapi.json` versionado precisava de asserção própria; o smoke de 10 GB não tinha API escutando e dependia de decisão do aluno (EXC-01). O pré-teste de 64 MiB de zeros (sugestão do revisor) provou `failed` na 1ª tentativa antes de gastar 10 GiB.
+
+### L-30. Git Bash e Node no Windows não compartilham o `/tmp` (SI-03.19)
+- **Simples:** o token gravado por um `node -e` não apareceu para o `cat` do script, que devolveu 401.
+- **Técnico:** `/tmp` no Git Bash é a pasta temporária do usuário; para o `node` do Windows é `C:\tmp`. Em scripts de smoke, grave arquivos pelo bash e passe a `node` caminhos `cygpath -m`. O custo foi ~2 min de uma execução inútil (sem efeito colateral) e as estatísticas finais refeitas a partir das amostras brutas.
+
+### L-31. Apagar o objeto não devolve o espaço do host (SI-03.19)
+- **Simples:** depois do smoke de 10 GiB o disco do host continuou 11 GB mais cheio.
+- **Técnico:** o storage esvaziou sozinho sua lixeira interna (`.minio.sys/tmp/.trash`, 11 GB) em ~2 min, mas o disco virtual do Docker Desktop cresce e não encolhe. Antes de um teste de volume, conferir o espaço livre (eram 30 GB para ~20 GB de pico) e avisar que compactar a imagem é decisão do aluno. Restam 2,6 GB em `.minio.sys/multipart` de uploads abandonados de rodadas de teste anteriores (caso TD-05, sem limpeza nesta fase).

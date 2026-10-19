@@ -1019,10 +1019,10 @@ SIs run one at a time, in numeric order (which respects every edge above); none 
 - [ ] SI-03.14 — Worker entrypoint and Compose service video-worker
 - [x] SI-03.15 — Endpoint GET /videos/:id (with optional authentication)
 - [x] SI-03.16 — Endpoint GET /videos/:id/stream
-- [ ] SI-03.17 — Endpoint GET /videos/:id/download
-- [ ] SI-03.18 — Endpoint GET /videos/:id/thumbnail
-- [ ] SI-03.19 — End-to-end upload flow, OpenAPI export and 10GB smoke
-- [ ] SI-03.20 — Update CLAUDE.md (root and nestjs-project) from the implemented code
+- [x] SI-03.17 — Endpoint GET /videos/:id/download
+- [x] SI-03.18 — Endpoint GET /videos/:id/thumbnail
+- [x] SI-03.19 — End-to-end upload flow, OpenAPI export and 10GB smoke
+- [x] SI-03.20 — Update CLAUDE.md (root and nestjs-project) from the implemented code
 
 **Phase documentation (required by the TD Revisions):**
 
