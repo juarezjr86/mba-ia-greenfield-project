@@ -221,7 +221,8 @@ docker compose exec nestjs-api npm run openapi:export     # rewrite openapi.json
 - Accepted containers (`ACCEPTED_CONTAINERS` in `src/media/probe-mapper.ts`, from `ffprobe`'s `format_name`): MP4 and QuickTime (`mov,mp4,...`), Matroska and WebM (`matroska,webm`). Any other container (AVI, MPEG-TS, ...) ends the video `failed` with `Unsupported container format: <name>`. Only MP4/H.264 was exercised against the real tools (TD-07 spike and tests).
 
 - A `failed` video whose object is missing still gets a stream URL that storage answers `404`; no `HeadObject` per request.
-- Abandoned drafts and their multipart uploads are not cleaned up in this phase.
+- Abandoned drafts and their multipart uploads are not cleaned up in this phase (follow-up for Phase 04). The storage lifecycle rule `AbortIncompleteMultipartUpload` is not applied: `pgsty/silo` rejected it in the research spike (OQ-1), so orphan parts stay in the volume until someone removes them.
+- Processing was validated only for MP4/H.264. The metadata spike read a 2.08 GB MP4 with `moov` at the end; the 10 GiB smoke proved the upload path and the API's responsiveness with zero-filled bytes (a file that ends `failed`), so no real video above about 2 GB went through `ffprobe` and `ffmpeg`.
 - `openapi.json` request DTOs have empty `properties`: the Swagger plugin does not run under the `ts-node` export script (response DTOs are complete).
 
 ## Architecture
