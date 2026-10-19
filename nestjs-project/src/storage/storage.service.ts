@@ -11,6 +11,7 @@ import {
   HeadBucketCommand,
   HeadObjectCommand,
   ListPartsCommand,
+  NoSuchUpload,
   PutBucketCorsCommand,
   PutObjectCommand,
   S3Client,
@@ -52,6 +53,15 @@ export interface PresignGetOptions {
   client: StorageClientKind;
   /** When set, the URL forces a download with this file name. */
   downloadFilename?: string;
+}
+
+/**
+ * True when storage no longer knows the multipart upload: it was completed
+ * (or aborted) already. Storage answers `NoSuchUpload` with status 404 for
+ * `ListParts` and `CompleteMultipartUpload` (checked against the pinned silo).
+ */
+export function isNoSuchUpload(err: unknown): boolean {
+  return err instanceof NoSuchUpload;
 }
 
 function isHttpStatus(err: unknown, status: number): boolean {

@@ -77,6 +77,32 @@ export class VideoNotInDraftException extends DomainException {
   }
 }
 
+export class UploadIncompleteException extends DomainException {
+  constructor(storedParts: number, expectedParts: number) {
+    super(
+      'UPLOAD_INCOMPLETE',
+      409,
+      `Only ${storedParts} of ${expectedParts} parts were uploaded`,
+    );
+  }
+}
+
+export class VideoAlreadyProcessedException extends DomainException {
+  constructor() {
+    super('VIDEO_ALREADY_PROCESSED', 409, 'The video was already processed');
+  }
+}
+
+export class VideoSizeMismatchException extends DomainException {
+  constructor(declaredBytes: number, storedBytes: number) {
+    super(
+      'VIDEO_SIZE_MISMATCH',
+      422,
+      `Uploaded size (${storedBytes} bytes) differs from the declared size (${declaredBytes} bytes)`,
+    );
+  }
+}
+
 export class InvalidPartNumbersException extends DomainException {
   constructor(partCount: number) {
     super(

@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 10/20 completed
+**SIs:** 11/20 completed
 
 ### SI-03.1 — Make the migrations integration spec repeatable
 - **Status:** completed
@@ -108,9 +108,17 @@
   - Not committed.
 
 ### SI-03.11 — Endpoint POST /videos/:id/upload/complete
-- **Status:** pending
-- **Tests:** -
-- **Observations:** none
+- **Status:** completed
+- **Tests:** new: `videos.service.spec.ts` +14 (`completeUpload`: draft, enqueue after the transaction, processing, ready/failed, not found, no channel, missing parts, parts that do not add up, object of another size, storage failure, 3 recovery cases), `videos.service.integration-spec.ts` +9 (real database, storage and Redis with a private prefix), `test/videos-complete-upload.e2e-spec.ts` 12 (authored from `specs/videos-complete-upload.plan.md`, plus malformed uuid and a `ready`/`failed` split); full suite 34 suites / 264 tests passing (241 + 23); e2e 7 suites / 94 tests passing with `--runInBand`; `tsc --noEmit` exit 0; `npm run lint` exit 0 (0 errors, 1 warning, unchanged); `npm run build` succeeds; Jest exits on its own
+- **Observations:**
+  - Advisor consulted before implementing (risk SI). Applied in this order: (1) `QueueModule` imported into `VideosModule` first, with no new logic, and the full unit and e2e suites run (241 / 82, Jest exits by itself) before any `completeUpload` code; (2) a throwaway probe against the real storage before writing the recovery branch (probe file removed).
+  - **Probe result (pinned `pgsty/silo`):** after `CompleteMultipartUpload`, both `ListParts` on the same upload id and a second `CompleteMultipartUpload` fail with `NoSuchUpload` (class `NoSuchUpload` of `@aws-sdk/client-s3`, `instanceof S3ServiceException`, HTTP 404); `ListParts` with an invented upload id answers the same, so "gone" and "never existed" look alike and `HeadObject` is what tells them apart; `HeadObject` returned the 1024-byte size and the content type. The plan's Hipótese for the recovery branch is therefore confirmed for this tag. Translation stays in the storage module: `isNoSuchUpload(err)` is exported from `storage.service.ts` and `VideosService` imports no S3 type; `listAllParts` still throws (SI-03.10 relies on it).
+  - **Lock and order:** channel lookup outside the transaction; inside it `manager.findOne(Video, { where: { id, channel_id }, lock: { mode: 'pessimistic_write' } })` (through the `manager`, a repository from `dataSource` would hold no lock). Rows are written through the same `manager`. `enqueueProcessing` runs after the transaction, so an exception after `completeMultipartUpload` rolls the row back to `draft` and the recovery branch handles it on the next call. `getOwnedDraft` is not reused (it reads outside the transaction and rejects `processing`); the narrowing of `upload_id`, `part_size_bytes` and `part_count` moved to a shared `asOwnedDraft`.
+  - **Checks run in this order:** parts fewer than `part_count` → `UPLOAD_INCOMPLETE` (409); sum of part sizes different from `size_bytes` → `VIDEO_SIZE_MISMATCH` (422), both before finalizing, so the upload stays open and the client can re-send; then `CompleteMultipartUpload`, `HeadObject` size check, update. In the recovery branch a missing object is `UPLOAD_INCOMPLETE` and an object of another size is `VIDEO_SIZE_MISMATCH`. `DomainExceptionFilter` passes `httpStatus` through, so the 422 needed no filter change.
+  - **Setup adaptation (the plan's spec could not run with the default config):** with `UPLOAD_PART_SIZE_BYTES` of 64 MiB a draft of about 10 MiB has `part_count` 1 and `part-urls` would reject part 2, so "two 5 MiB parts plus a short last part" needs 5 MiB parts. The integration spec overrides `videosConfig.KEY` with a mutable object and sets `uploadPartSizeBytes` to 5 MiB only inside the `completeUpload` describe; the e2e passes `{ videos: { uploadPartSizeBytes } }` to `createVideosTestApp`. The Joi minimum is bypassed by the provider override, not by changing the validation.
+  - Shared helper `createVideosTestApp` now takes an optional `{ videos }` override and always overrides `queueConfig.KEY` with a private prefix, so no e2e job is ever seen by the Compose `video-worker`. `VideosModule` imports `QueueModule`, so every `AppModule` e2e now opens a Redis connection; the full e2e run still exits.
+  - Beyond the plan's list: an integration test where the enqueue fails after the commit (row stays `processing`, no job; a second call enqueues one job), which is the dual write that TD-11 says the fixed `jobId` makes safe.
+  - Not committed.
 
 ### SI-03.12 — Media tools: ffprobe and ffmpeg over a presigned URL
 - **Status:** pending

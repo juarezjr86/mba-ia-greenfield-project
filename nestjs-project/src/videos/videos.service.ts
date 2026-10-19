@@ -1,18 +1,27 @@
 import { randomUUID } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import type { ConfigType } from '@nestjs/config';
-import { DataSource } from 'typeorm';
+import { DataSource, type EntityManager } from 'typeorm';
 import {
   ChannelNotFoundException,
   InvalidPartNumbersException,
   PartUrlsBatchTooLargeException,
+  UploadIncompleteException,
   UploadSizeExceededException,
+  VideoAlreadyProcessedException,
   VideoNotFoundException,
   VideoNotInDraftException,
+  VideoSizeMismatchException,
 } from '../common/exceptions/domain.exception';
 import { ChannelsService } from '../channels/channels.service';
 import videosConfig from '../config/videos.config';
-import { StorageService } from '../storage/storage.service';
+import { VideoQueueProducer } from '../queue/video-queue.producer';
+import {
+  isNoSuchUpload,
+  StorageService,
+  type StoredPart,
+} from '../storage/storage.service';
+import type { CompleteUploadResponseDto } from './dto/complete-upload-response.dto';
 import type { InitiateUploadDto } from './dto/initiate-upload.dto';
 import type { InitiateUploadResponseDto } from './dto/initiate-upload-response.dto';
 import type { PartUrlsDto } from './dto/part-urls.dto';
@@ -35,6 +44,7 @@ export class VideosService {
     private readonly dataSource: DataSource,
     private readonly channelsService: ChannelsService,
     private readonly storageService: StorageService,
+    private readonly videoQueueProducer: VideoQueueProducer,
     @Inject(videosConfig.KEY)
     private readonly config: ConfigType<typeof videosConfig>,
   ) {}
@@ -176,11 +186,118 @@ export class VideosService {
       throw new VideoNotInDraftException();
     }
 
-    const { upload_id, part_size_bytes, part_count } = video;
-    if (upload_id === null || part_size_bytes === null || part_count === null) {
-      // A draft is saved with its multipart fields in one transaction.
-      throw new Error(`Draft video ${videoId} has no multipart upload`);
-    }
-    return Object.assign(video, { upload_id, part_size_bytes, part_count });
+    return asOwnedDraft(video);
   }
+
+  /**
+   * Finalizes the multipart upload, moves the video to `processing` and
+   * enqueues its job. Idempotent: a video already `processing` is only
+   * enqueued again (the fixed job id keeps a single job). The row is locked
+   * for the whole transaction, so parallel calls serialize and the second one
+   * finds `processing`. The enqueue happens after the commit; if it fails the
+   * client retries and the `processing` branch enqueues.
+   */
+  async completeUpload(
+    userId: string,
+    videoId: string,
+  ): Promise<CompleteUploadResponseDto> {
+    const channel = await this.channelsService.findByUserId(userId);
+    if (!channel) {
+      throw new VideoNotFoundException();
+    }
+
+    await this.dataSource.transaction(async (manager) => {
+      const video = await manager.findOne(Video, {
+        where: { id: videoId, channel_id: channel.id },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!video) {
+        throw new VideoNotFoundException();
+      }
+      if (video.status === VideoStatus.PROCESSING) {
+        return;
+      }
+      if (video.status !== VideoStatus.DRAFT) {
+        throw new VideoAlreadyProcessedException();
+      }
+
+      await this.finalizeUpload(manager, asOwnedDraft(video));
+    });
+
+    await this.videoQueueProducer.enqueueProcessing(videoId);
+    return { id: videoId, status: VideoStatus.PROCESSING };
+  }
+
+  /**
+   * Checks the stored parts, completes the multipart upload and marks the
+   * video `processing`. A throw rolls the row back to `draft`; storage may
+   * already hold the finalized object, which the recovery branch handles on
+   * the next call.
+   */
+  private async finalizeUpload(
+    manager: EntityManager,
+    video: OwnedDraft,
+  ): Promise<void> {
+    let parts: StoredPart[];
+    try {
+      parts = await this.storageService.listAllParts(
+        video.storage_key,
+        video.upload_id,
+      );
+    } catch (err) {
+      if (!isNoSuchUpload(err)) {
+        throw err;
+      }
+      // An earlier call completed the upload in storage but did not reach the
+      // database update: the object is the proof.
+      await this.assertObjectHasDeclaredSize(video);
+      await this.markProcessing(manager, video.id);
+      return;
+    }
+
+    if (parts.length < video.part_count) {
+      throw new UploadIncompleteException(parts.length, video.part_count);
+    }
+    const storedBytes = parts.reduce((sum, part) => sum + part.sizeBytes, 0);
+    if (storedBytes !== video.size_bytes) {
+      throw new VideoSizeMismatchException(video.size_bytes, storedBytes);
+    }
+
+    await this.storageService.completeMultipartUpload(
+      video.storage_key,
+      video.upload_id,
+      parts.map(({ partNumber, etag }) => ({ partNumber, etag })),
+    );
+    await this.assertObjectHasDeclaredSize(video);
+    await this.markProcessing(manager, video.id);
+  }
+
+  private async assertObjectHasDeclaredSize(video: OwnedDraft): Promise<void> {
+    const object = await this.storageService.headObject(video.storage_key);
+    if (!object) {
+      throw new UploadIncompleteException(0, video.part_count);
+    }
+    if (object.sizeBytes !== video.size_bytes) {
+      throw new VideoSizeMismatchException(video.size_bytes, object.sizeBytes);
+    }
+  }
+
+  private async markProcessing(
+    manager: EntityManager,
+    videoId: string,
+  ): Promise<void> {
+    await manager.update(Video, videoId, {
+      status: VideoStatus.PROCESSING,
+      upload_id: null,
+    });
+  }
+}
+
+function asOwnedDraft(video: Video): OwnedDraft {
+  const { upload_id, part_size_bytes, part_count } = video;
+  if (upload_id === null || part_size_bytes === null || part_count === null) {
+    // A draft is saved with its multipart fields in one transaction.
+    throw new Error(`Draft video ${video.id} has no multipart upload`);
+  }
+  return Object.assign(video, { upload_id, part_size_bytes, part_count });
 }

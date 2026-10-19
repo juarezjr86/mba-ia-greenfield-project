@@ -1,14 +1,22 @@
 import { randomUUID } from 'node:crypto';
+import { getQueueToken } from '@nestjs/bullmq';
 import { ConfigModule, type ConfigType } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { Queue } from 'bullmq';
 import { DataSource } from 'typeorm';
 import { RefreshToken } from '../auth/entities/refresh-token.entity';
 import { VerificationToken } from '../auth/entities/verification-token.entity';
 import { Channel } from '../channels/entities/channel.entity';
 import { ChannelsService } from '../channels/channels.service';
+import queueConfig from '../config/queue.config';
 import storageConfig from '../config/storage.config';
 import videosConfig from '../config/videos.config';
+import {
+  VIDEO_PROCESSING_QUEUE,
+  type ProcessVideoJobData,
+} from '../queue/queue.constants';
+import { VideoQueueProducer } from '../queue/video-queue.producer';
 import { StorageService } from '../storage/storage.service';
 import {
   cleanAllTables,
@@ -31,19 +39,26 @@ function testStorageConfig(): ConfigType<typeof storageConfig> {
   };
 }
 
-describe('VideosService (integration, real database and storage)', () => {
+// A private prefix keeps the jobs of this suite apart from the Compose video-worker.
+const TEST_QUEUE_PREFIX = `test-${randomUUID()}`;
+// Mutable on purpose: the completeUpload tests shrink the part size.
+const testVideosConfig: ConfigType<typeof videosConfig> = videosConfig();
+
+describe('VideosService (integration, real database, storage and queue)', () => {
   let module: TestingModule;
   let dataSource: DataSource;
   let videosService: VideosService;
   let storageService: StorageService;
   let channelsService: ChannelsService;
+  let queue: Queue<ProcessVideoJobData>;
+  let producer: VideoQueueProducer;
 
   beforeAll(async () => {
     module = await Test.createTestingModule({
       imports: [
         ConfigModule.forRoot({
           isGlobal: true,
-          load: [videosConfig, storageConfig],
+          load: [videosConfig, storageConfig, queueConfig],
         }),
         TypeOrmModule.forRoot(createTestDataSource(ALL_ENTITIES).options),
         VideosModule,
@@ -51,16 +66,23 @@ describe('VideosService (integration, real database and storage)', () => {
     })
       .overrideProvider(storageConfig.KEY)
       .useValue(testStorageConfig())
+      .overrideProvider(queueConfig.KEY)
+      .useValue({ ...queueConfig(), prefix: TEST_QUEUE_PREFIX })
+      .overrideProvider(videosConfig.KEY)
+      .useValue(testVideosConfig)
       .compile();
 
     dataSource = module.get(DataSource);
     videosService = module.get(VideosService);
     storageService = module.get(StorageService);
     channelsService = module.get(ChannelsService);
+    queue = module.get(getQueueToken(VIDEO_PROCESSING_QUEUE));
+    producer = module.get(VideoQueueProducer);
     await storageService.ensureBucket();
   }, 30000);
 
   afterAll(async () => {
+    await queue.obliterate({ force: true });
     await module.close();
   });
 
@@ -261,6 +283,207 @@ describe('VideosService (integration, real database and storage)', () => {
 
       await expect(
         videosService.listUploadedParts(other.userId, id),
+      ).rejects.toMatchObject({ errorCode: 'VIDEO_NOT_FOUND' });
+    });
+  });
+
+  describe('completeUpload', () => {
+    // Two 5 MiB parts and a short last part: the smallest real multipart shape.
+    const PART_SIZE = 5 * MIB;
+    const FULL_SIZES = [PART_SIZE, PART_SIZE, 1024];
+    const SIZE = FULL_SIZES.reduce((sum, size) => sum + size, 0);
+
+    beforeEach(async () => {
+      testVideosConfig.uploadPartSizeBytes = PART_SIZE;
+      await queue.obliterate({ force: true });
+    });
+
+    afterEach(() => {
+      testVideosConfig.uploadPartSizeBytes = videosConfig().uploadPartSizeBytes;
+    });
+
+    async function initiateDraft(
+      userId: string,
+    ): Promise<{ id: string; part_count: number }> {
+      return videosService.initiateUpload(userId, {
+        filename: 'aula.mp4',
+        size_bytes: SIZE,
+        content_type: 'video/mp4',
+      });
+    }
+
+    /** Sends parts 1..sizes.length straight to storage with the given sizes. */
+    async function sendParts(
+      userId: string,
+      videoId: string,
+      sizes: number[],
+    ): Promise<void> {
+      const { urls } = await videosService.createPartUrls(userId, videoId, {
+        part_numbers: sizes.map((_, index) => index + 1),
+      });
+      for (const { part_number, url } of urls) {
+        const put = await fetch(url, {
+          method: 'PUT',
+          body: new Uint8Array(sizes[part_number - 1]),
+        });
+        expect(put.status).toBe(200);
+      }
+    }
+
+    const rowOf = (id: string): Promise<Video> =>
+      dataSource.getRepository(Video).findOneByOrFail({ id });
+
+    const jobsOf = async (id: string): Promise<number> =>
+      (await queue.getJobs()).filter((job) => job.id === id).length;
+
+    it('completes into processing with the object stored and one job', async () => {
+      const { userId } = await createUserWithChannel();
+      const { id } = await initiateDraft(userId);
+      await sendParts(userId, id, FULL_SIZES);
+
+      const result = await videosService.completeUpload(userId, id);
+
+      expect(result).toEqual({ id, status: VideoStatus.PROCESSING });
+      const row = await rowOf(id);
+      expect(row.status).toBe(VideoStatus.PROCESSING);
+      expect(row.upload_id).toBeNull();
+      await expect(storageService.headObject(row.storage_key)).resolves.toEqual(
+        expect.objectContaining({ sizeBytes: SIZE }),
+      );
+      expect(await jobsOf(id)).toBe(1);
+      const job = await queue.getJob(id);
+      expect(job!.data).toEqual({ videoId: id });
+    });
+
+    it('keeps the draft when a part is missing', async () => {
+      const { userId } = await createUserWithChannel();
+      const { id } = await initiateDraft(userId);
+      await sendParts(userId, id, [PART_SIZE]);
+
+      await expect(
+        videosService.completeUpload(userId, id),
+      ).rejects.toMatchObject({ errorCode: 'UPLOAD_INCOMPLETE' });
+
+      const row = await rowOf(id);
+      expect(row.status).toBe(VideoStatus.DRAFT);
+      expect(row.upload_id).not.toBeNull();
+      expect(await jobsOf(id)).toBe(0);
+    });
+
+    it('keeps the draft, and the upload open, when the parts do not add up', async () => {
+      const { userId } = await createUserWithChannel();
+      const { id } = await initiateDraft(userId);
+      await sendParts(userId, id, [PART_SIZE, PART_SIZE, 2048]);
+
+      await expect(
+        videosService.completeUpload(userId, id),
+      ).rejects.toMatchObject({ errorCode: 'VIDEO_SIZE_MISMATCH' });
+
+      const row = await rowOf(id);
+      expect(row.status).toBe(VideoStatus.DRAFT);
+      // Nothing was finalized, so the client can re-send the last part.
+      await expect(
+        storageService.listAllParts(row.storage_key, row.upload_id!),
+      ).resolves.toHaveLength(3);
+      expect(await jobsOf(id)).toBe(0);
+    });
+
+    it('does not create a second job when called again', async () => {
+      const { userId } = await createUserWithChannel();
+      const { id } = await initiateDraft(userId);
+      await sendParts(userId, id, FULL_SIZES);
+
+      await videosService.completeUpload(userId, id);
+      const second = await videosService.completeUpload(userId, id);
+
+      expect(second).toEqual({ id, status: VideoStatus.PROCESSING });
+      expect(await jobsOf(id)).toBe(1);
+    });
+
+    it('serializes two parallel calls: both succeed and one job exists', async () => {
+      const { userId } = await createUserWithChannel();
+      const { id } = await initiateDraft(userId);
+      await sendParts(userId, id, FULL_SIZES);
+
+      const results = await Promise.all([
+        videosService.completeUpload(userId, id),
+        videosService.completeUpload(userId, id),
+      ]);
+
+      expect(results).toEqual([
+        { id, status: VideoStatus.PROCESSING },
+        { id, status: VideoStatus.PROCESSING },
+      ]);
+      expect((await rowOf(id)).status).toBe(VideoStatus.PROCESSING);
+      expect(await jobsOf(id)).toBe(1);
+    });
+
+    it('recovers when the enqueue failed after the commit', async () => {
+      const { userId } = await createUserWithChannel();
+      const { id } = await initiateDraft(userId);
+      await sendParts(userId, id, FULL_SIZES);
+      jest
+        .spyOn(producer, 'enqueueProcessing')
+        .mockRejectedValueOnce(new Error('redis down'));
+
+      await expect(videosService.completeUpload(userId, id)).rejects.toThrow(
+        'redis down',
+      );
+      expect((await rowOf(id)).status).toBe(VideoStatus.PROCESSING);
+      expect(await jobsOf(id)).toBe(0);
+
+      await videosService.completeUpload(userId, id);
+
+      expect(await jobsOf(id)).toBe(1);
+    });
+
+    it('recovers an object finalized by an earlier call that failed before the update', async () => {
+      const { userId } = await createUserWithChannel();
+      const { id } = await initiateDraft(userId);
+      await sendParts(userId, id, FULL_SIZES);
+      const before = await rowOf(id);
+      const parts = await storageService.listAllParts(
+        before.storage_key,
+        before.upload_id!,
+      );
+      // What the failed call did: finalize in storage, never reach the database.
+      await storageService.completeMultipartUpload(
+        before.storage_key,
+        before.upload_id!,
+        parts.map(({ partNumber, etag }) => ({ partNumber, etag })),
+      );
+      expect((await rowOf(id)).status).toBe(VideoStatus.DRAFT);
+
+      const result = await videosService.completeUpload(userId, id);
+
+      expect(result).toEqual({ id, status: VideoStatus.PROCESSING });
+      const row = await rowOf(id);
+      expect(row.status).toBe(VideoStatus.PROCESSING);
+      expect(row.upload_id).toBeNull();
+      expect(await jobsOf(id)).toBe(1);
+    });
+
+    it('rejects a ready or failed video with VIDEO_ALREADY_PROCESSED', async () => {
+      const { userId } = await createUserWithChannel();
+      const { id } = await initiateDraft(userId);
+
+      for (const status of [VideoStatus.READY, VideoStatus.FAILED]) {
+        await dataSource.getRepository(Video).update(id, { status });
+
+        await expect(
+          videosService.completeUpload(userId, id),
+        ).rejects.toMatchObject({ errorCode: 'VIDEO_ALREADY_PROCESSED' });
+      }
+      expect(await jobsOf(id)).toBe(0);
+    });
+
+    it('hides the video of another user as VIDEO_NOT_FOUND', async () => {
+      const owner = await createUserWithChannel();
+      const other = await createUserWithChannel();
+      const { id } = await initiateDraft(owner.userId);
+
+      await expect(
+        videosService.completeUpload(other.userId, id),
       ).rejects.toMatchObject({ errorCode: 'VIDEO_NOT_FOUND' });
     });
   });

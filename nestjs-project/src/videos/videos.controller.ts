@@ -20,6 +20,7 @@ import type { JwtPayload } from '../auth/auth.types';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { ApiErrorEnvelope } from '../common/openapi/api-error-envelope.dto';
 import videosConfig from '../config/videos.config';
+import { CompleteUploadResponseDto } from './dto/complete-upload-response.dto';
 import { InitiateUploadResponseDto } from './dto/initiate-upload-response.dto';
 import { InitiateUploadDto } from './dto/initiate-upload.dto';
 import { PartUrlsResponseDto } from './dto/part-urls-response.dto';
@@ -170,5 +171,56 @@ export class VideosController {
     @Param('id', ParseUUIDPipe) id: string,
   ): Promise<UploadedPartsResponseDto> {
     return this.videosService.listUploadedParts(user.sub, id);
+  }
+
+  @Post(':id/upload/complete')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiBearerAuth('access-token')
+  @ApiOperation({
+    summary: 'Complete the upload and start processing',
+    description:
+      'Finalizes the multipart upload from the parts storage holds, checks the stored size, moves the video to processing and enqueues its job. Calling it again while the video is processing is safe and returns the same response.',
+  })
+  @ApiResponse({
+    status: 202,
+    description: 'Upload completed; the video is being processed',
+    type: CompleteUploadResponseDto,
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'The video id is not a uuid',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Missing, invalid or expired access token',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'The video does not exist or belongs to another channel',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 409,
+    description:
+      'Fewer parts than expected were uploaded (UPLOAD_INCOMPLETE), or the video is already ready or failed (VIDEO_ALREADY_PROCESSED)',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 422,
+    description: 'The uploaded size differs from the declared size',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 429,
+    description:
+      'Too many requests: the limit of the videos routes was exceeded (plain throttler body, not the error envelope)',
+  })
+  async completeUpload(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<CompleteUploadResponseDto> {
+    return this.videosService.completeUpload(user.sub, id);
   }
 }
