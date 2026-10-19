@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 13/20 completed
+**SIs:** 14/20 completed
 
 ### SI-03.1 — Make the migrations integration spec repeatable
 - **Status:** completed
@@ -150,9 +150,18 @@
   - Not committed.
 
 ### SI-03.14 — Worker entrypoint and Compose service video-worker
-- **Status:** pending
-- **Tests:** -
-- **Observations:** none
+- **Status:** completed
+- **Tests:** new: `src/worker/worker.module.integration-spec.ts` 6 (real `WorkerModule` and `AppModule`, real database and Redis, private queue prefix); full suite 41 suites / 346 tests passing (340 + 6) and e2e 7 suites / 94 passing with `--runInBand`, both **with the `video-worker` container running**; `tsc --noEmit` exit 0; `npm run lint` exit 0 (0 errors, 1 warning, unchanged); `npm run build` succeeds and emits `dist/worker.js`; `docker compose -f compose.yaml config -q` exit 0 without the override
+- **Observations:**
+  - Advisor consulted before implementing. Files: `src/worker.ts` (`createApplicationContext(WorkerModule)`, `enableShutdownHooks()`, logs `Video worker listening on queue video-processing`), `src/worker/worker.module.ts`, `src/config/root-modules.ts`, scripts `start:worker` and `start:worker:prod` in `package.json`, service `video-worker` in `compose.yaml`, and the same service in the unversioned `compose.override.yaml` for the `node_modules` volume. `VideoProcessor` gained an `@OnWorkerEvent('closed')` log (`Worker closed`) as positive evidence of a clean stop.
+  - **Shared root configuration (not in the plan's file list):** `rootConfigModule` and `rootDatabaseModule` are defined once in `src/config/root-modules.ts` and used by both `AppModule` and `WorkerModule`, so a new config namespace cannot exist in one process and be missing in the other. This touched `AppModule`; the full e2e still passes.
+  - **Entity graph:** `autoLoadEntities` only registers what a `forFeature` declares and the consumer declares `Video` alone, whose `channel` relation needs `Channel`, `User` and the token tables. `WorkerModule` registers them with `TypeOrmModule.forFeature([User, Channel, RefreshToken, VerificationToken])`. The module spec compiles the real `WorkerModule` with its own `TypeOrmModule.forRootAsync` (not `createTestDataSource(ALL_ENTITIES)`, which would hide the gap) and asserts the metadata of `Video#channel` and the five tables.
+  - **Deviation 1, spec name:** the plan lists `worker.module.spec.ts` as a unit test; the module connects to the database and Redis, so by the project's test-type rule it is `worker.module.integration-spec.ts`.
+  - **Deviation 2, Compose command:** the plan says `npm run start:worker`. Measured: with `command: npm run start:worker` the SIGTERM of `docker compose stop` ended the process before the shutdown hooks ran (`npm error signal SIGTERM`, exit code 1, no `Worker closed` in the log; stop took 1.6 s). With the exec form `node -r ts-node/register -r tsconfig-paths/register src/worker.ts` (the same program as the npm script, node as PID 1): stop took 0.9 s, exit code 0, log `Worker closed`, no error and no stalled-job message. The npm scripts stay for running by hand; the comment in `compose.yaml` records why the service does not use them.
+  - **Shutdown code read in the installed package:** `@nestjs/bullmq` `BullExplorer.onApplicationShutdown` runs `worker.close()` for every worker; `Worker.close()` waits for the active job. `stop_grace_period: 60s` is set; a job longer than that is killed and recovered by BullMQ's stalled check once (`maxStalledCount` 1). A second kill of the same job falls in the known gap recorded in SI-03.13 (the video would stay `processing`). The AC only requires a clean stop of an idle worker; a stop with an active job was not exercised.
+  - **Acceptance, measured:** (1) `docker compose up -d video-worker` leaves it running; its log contains `Video worker listening on queue video-processing`; `docker inspect` shows no published ports. (2) The API does not consume: with `AppModule` and a private prefix `queue.getWorkers()` is `[]` and an enqueued job stays `waiting` with `attemptsMade` 0; with `WorkerModule` the same call finds exactly one Worker (the check polls up to 5 s, the Worker shows up after about 100 ms, so the negative test can fail). The `nestjs-api` container only idles with `tail -f /dev/null`, so it proves nothing. (3) A throwaway spec (default prefix, dev bucket, removed afterwards, data deleted) created a `processing` video and enqueued it from another process while the Compose worker ran: the video was `ready` with its thumbnail about 1.6 s later. (4) `docker compose stop video-worker`: see Deviation 2.
+  - **Normal state of the environment is now `video-worker` up.** It uses the default prefix `bull` and the dev bucket; every test suite uses a private prefix and its own bucket, so the suites ran green with it running and neither side saw the other's jobs.
+  - Not committed.
 
 ### SI-03.15 — Endpoint GET /videos/:id (with optional authentication)
 - **Status:** pending
@@ -186,4 +195,4 @@
 
 ---
 
-Retomar: leia a memória projeto-streamtube-fase03-ambiente, docs/phases/phase-03-videos/progress.md e licoes.md (L-20). Próximo passo: commitar a SI-03.13 (se pedir) e seguir com a SI-03.14. Pendente: nada.
+Retomar: leia a memória projeto-streamtube-fase03-ambiente, docs/phases/phase-03-videos/progress.md e licoes.md (L-20). Próximo passo: commitar a SI-03.14 (se pedir) e seguir com a SI-03.15. Pendente: nada.

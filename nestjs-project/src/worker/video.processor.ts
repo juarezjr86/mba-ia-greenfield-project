@@ -37,6 +37,12 @@ export class VideoProcessor extends WorkerHost {
     }
   }
 
+  /** Positive evidence of a clean stop: the Worker finished its active job. */
+  @OnWorkerEvent('closed')
+  onClosed(): void {
+    this.logger.log('Worker closed');
+  }
+
   /**
    * BullMQ emits `failed` after every failed attempt, once `attemptsMade` has
    * already been incremented (the same test `Job.shouldRetryJob` applies). The

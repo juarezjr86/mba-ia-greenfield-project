@@ -17,6 +17,39 @@ services:
       redis:
         condition: service_healthy
 
+  # Queue consumer (phase-03-videos/TD-06, option C): the same image and bind
+  # mount as the API, started through its own entrypoint (src/worker.ts). It
+  # reads the same .env as the API, publishes no port, and the API never runs
+  # a Worker. The dev command does not use `nest start`: with deleteOutDir a
+  # second compiler would wipe the dist/ the API dev server writes.
+  # The command is the exec form of `npm run start:worker` on purpose: under
+  # `npm run` the SIGTERM of `docker compose stop` ended the process before the
+  # shutdown hooks ran (exit 1, no "Worker closed"); with node as PID 1 it exits
+  # 0 in about a second, after closing the Worker.
+  # stop_grace_period: closing the Worker waits for the active job; a longer
+  # job is killed after this time and recovered by BullMQ's stalled check.
+  video-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    command:
+      - node
+      - -r
+      - ts-node/register
+      - -r
+      - tsconfig-paths/register
+      - src/worker.ts
+    stop_grace_period: 60s
+    volumes:
+      - .:/home/node/app
+    depends_on:
+      db:
+        condition: service_healthy
+      storage:
+        condition: service_started
+      redis:
+        condition: service_healthy
+
   db:
     image: postgres:17
     ports:
