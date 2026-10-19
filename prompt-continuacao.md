@@ -1,4 +1,9 @@
-# Prompt de continuação — StreamTube Fase 03 (20/20 SIs implementadas, fechamento, 2026-10-19)
+# Prompt de continuação — StreamTube Fase 03 (ENTREGUE em 2026-10-19, aguardando a nota)
+
+> **Estado atual:** a URL do fork (`https://github.com/juarezjr86/mba-ia-greenfield-project`) foi enviada na
+> plataforma em 2026-10-19 às 15:40 e a `main` do fork (`0b647f1`, PR #2 mesclado) é a entrega. Não há trabalho
+> pendente: aguarda-se a nota. Enquanto a correção estiver aberta, não tocar na `main`; qualquer ajuste vai por
+> `bugfix/*` ou `docs/*` e só é mesclado depois da nota. O texto abaixo é o histórico do fechamento.
 
 Cole este arquivo inteiro como primeira mensagem de uma nova sessão (após `/clear`). Ele substitui
 a versão anterior (SI-03.16 pronta). Leia antes de agir, nesta ordem: a memória
