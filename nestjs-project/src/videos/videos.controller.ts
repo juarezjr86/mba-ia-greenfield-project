@@ -10,6 +10,7 @@ import {
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
+  ApiHeader,
   ApiOperation,
   ApiResponse,
   ApiTags,
@@ -18,6 +19,8 @@ import {
 import { Throttle } from '@nestjs/throttler';
 import type { JwtPayload } from '../auth/auth.types';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { OptionalAuth } from '../auth/decorators/optional-auth.decorator';
+import { Public } from '../auth/decorators/public.decorator';
 import { ApiErrorEnvelope } from '../common/openapi/api-error-envelope.dto';
 import videosConfig from '../config/videos.config';
 import { CompleteUploadResponseDto } from './dto/complete-upload-response.dto';
@@ -26,6 +29,7 @@ import { InitiateUploadDto } from './dto/initiate-upload.dto';
 import { PartUrlsResponseDto } from './dto/part-urls-response.dto';
 import { PartUrlsDto } from './dto/part-urls.dto';
 import { UploadedPartsResponseDto } from './dto/uploaded-parts-response.dto';
+import { toVideoResponse, VideoResponseDto } from './dto/video-response.dto';
 import { VideosService } from './videos.service';
 
 // Replaces the global 10 requests per minute: a 10 GB upload is thousands of
@@ -222,5 +226,56 @@ export class VideosController {
     @Param('id', ParseUUIDPipe) id: string,
   ): Promise<CompleteUploadResponseDto> {
     return this.videosService.completeUpload(user.sub, id);
+  }
+
+  @Get(':id')
+  @Public()
+  @OptionalAuth()
+  @ApiHeader({
+    name: 'Authorization',
+    required: false,
+    description:
+      'Optional `Bearer <access_token>`. Without it the caller is anonymous and sees only ready videos; a token that is sent but invalid or expired is a 401.',
+  })
+  @ApiOperation({
+    summary: 'Get a video',
+    description:
+      'Metadata and status of a video, at its unique URL. The owner reads the video in any status (and sees `failure_reason`); everyone else, including anonymous visitors, only when it is ready. A hidden video answers 404, so a draft is not revealed.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'The video',
+    type: VideoResponseDto,
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'The video id is not a uuid',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'An access token was sent but is invalid or expired',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 404,
+    description:
+      'The video does not exist, or it is not ready and the caller is not its owner',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 429,
+    description:
+      'Too many requests: the limit of the videos routes was exceeded (plain throttler body, not the error envelope)',
+  })
+  async getVideo(
+    @CurrentUser() user: JwtPayload | undefined,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<VideoResponseDto> {
+    const { video, isOwner } = await this.videosService.getVisibleVideo(
+      user?.sub,
+      id,
+    );
+    return toVideoResponse(video, isOwner);
   }
 }

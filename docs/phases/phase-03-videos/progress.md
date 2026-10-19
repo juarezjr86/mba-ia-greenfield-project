@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 14/20 completed
+**SIs:** 15/20 completed
 
 ### SI-03.1 — Make the migrations integration spec repeatable
 - **Status:** completed
@@ -164,9 +164,15 @@
   - Not committed.
 
 ### SI-03.15 — Endpoint GET /videos/:id (with optional authentication)
-- **Status:** pending
-- **Tests:** -
-- **Observations:** none
+- **Status:** completed
+- **Tests:** new/changed: `jwt-auth.guard.spec.ts` 15 (was 5), `videos.service.spec.ts` +14 (`getVisibleVideo`: visibility matrix of owner, other user, user without channel and anonymous against the four statuses, unknown id, no channel lookup when anonymous), `videos.service.integration-spec.ts` +6 (real database), `dto/video-response.dto.spec.ts` 6, `test/videos-get.e2e-spec.ts` 15 (authored from `specs/videos-get.plan.md`, plus a `Basic` scheme and an empty `Bearer`); full suite 42 suites / 386 tests passing (346 + 40), e2e 8 suites / 109 tests passing with `--runInBand` (94 + 15); `tsc --noEmit` exit 0; `npm run lint` exit 0 (0 errors, 1 warning, unchanged); `npm run build` succeeds; Jest exits on its own
+- **Observations:**
+  - Advisor consulted before implementing (risk SI: touches the global guard). Applied: (1) regression of `@Public()` without `@OptionalAuth()`: the guard spec and the e2e both send a **garbage Bearer** to a public route (`GET /`, `POST /auth/forgot-password`) and it still passes, so a front that sends an expired token to a Phase 02 public route does not start getting 401; (2) the `Reflector` mock in the guard spec now answers per key (`IS_PUBLIC_KEY` / `OPTIONAL_AUTH_KEY`) instead of one value for both, and the 5 old tests were kept inside the new `protected routes` block; (3) on an optional route only a **missing** header is anonymous; `Basic …`, a header without a scheme and `Bearer ` (empty) are 401, tested at unit and e2e level; (4) `@CurrentUser()` returns `request.user` unchanged, so the handler types it `JwtPayload | undefined` and passes `user?.sub`; (5) the response mapper is an allowlist built field by field and both its spec and the e2e compare `Object.keys(body).sort()` with the 17 contract keys, so `thumbnail_key`, `part_size_bytes` and `part_count` cannot leak either.
+  - **Guard change:** `OPTIONAL_AUTH_KEY` is read only when the route is `@Public()`, so `@OptionalAuth()` alone leaves the route protected (401 without a token); the JSDoc of the decorator says both are needed. `@Public()` without `@OptionalAuth()` returns `true` before touching the header, exactly as before.
+  - **Owner lookup (declared choice):** `getVisibleVideo` loads the video by id alone and, only when there is a `userId`, calls `ChannelsService.findByUserId` and compares `channel.id === video.channel_id`, the same pattern as `getOwnedDraft` (SI-03.9), so channel access stays in `ChannelsModule`; the plan's "loads the video with its channel owner" was not implemented as a join. `getOwnedDraft` is not reused (it rejects any status but `draft`). It returns `{ video: Video, isOwner }` (the entity, not the DTO) because SI-03.16..18 need `storage_key`, `thumbnail_key` and `status`; the controller maps with `toVideoResponse(video, isOwner)`.
+  - Cost: a signed-in caller costs one extra query (the channel lookup) even for a `ready` video; kept so `isOwner` is always correct (it decides `failure_reason`).
+  - Swagger: `@ApiHeader` for the optional `Authorization`, no `@ApiBearerAuth` (controller rule for `@Public()` routes); responses 200, 400, 401, 404, 429. The expired token in the e2e is signed with the app's own `JwtService` (`expiresIn: -60`).
+  - Not committed.
 
 ### SI-03.16 — Endpoint GET /videos/:id/stream
 - **Status:** pending
@@ -195,4 +201,4 @@
 
 ---
 
-Retomar: leia a memória projeto-streamtube-fase03-ambiente, docs/phases/phase-03-videos/progress.md e licoes.md (L-20). Próximo passo: commitar a SI-03.14 (se pedir) e seguir com a SI-03.15. Pendente: nada.
+Retomar: leia a memória projeto-streamtube-fase03-ambiente, docs/phases/phase-03-videos/progress.md e licoes.md (L-20). Próximo passo: commitar a SI-03.15 (se pedir) e seguir com a SI-03.16 (GET /videos/:id/stream, advisor antes). Pendente: nada.

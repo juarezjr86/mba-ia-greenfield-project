@@ -487,4 +487,89 @@ describe('VideosService (integration, real database, storage and queue)', () => 
       ).rejects.toMatchObject({ errorCode: 'VIDEO_NOT_FOUND' });
     });
   });
+
+  describe('getVisibleVideo', () => {
+    async function initiateDraft(userId: string): Promise<{ id: string }> {
+      return videosService.initiateUpload(userId, dto);
+    }
+
+    it('lets the owner read a draft, and flags the owner', async () => {
+      const { userId } = await createUserWithChannel();
+      const { id } = await initiateDraft(userId);
+
+      const { video, isOwner } = await videosService.getVisibleVideo(
+        userId,
+        id,
+      );
+
+      expect(isOwner).toBe(true);
+      expect(video).toMatchObject({ id, status: VideoStatus.DRAFT });
+    });
+
+    it('hides a draft from another user as VIDEO_NOT_FOUND', async () => {
+      const owner = await createUserWithChannel();
+      const other = await createUserWithChannel();
+      const { id } = await initiateDraft(owner.userId);
+
+      await expect(
+        videosService.getVisibleVideo(other.userId, id),
+      ).rejects.toMatchObject({ errorCode: 'VIDEO_NOT_FOUND' });
+    });
+
+    it('hides a non-ready video from an anonymous caller', async () => {
+      const { userId } = await createUserWithChannel();
+      const { id } = await initiateDraft(userId);
+
+      for (const status of [
+        VideoStatus.DRAFT,
+        VideoStatus.PROCESSING,
+        VideoStatus.FAILED,
+      ]) {
+        await dataSource.getRepository(Video).update(id, { status });
+
+        await expect(
+          videosService.getVisibleVideo(undefined, id),
+        ).rejects.toMatchObject({ errorCode: 'VIDEO_NOT_FOUND' });
+      }
+    });
+
+    it('lets anyone read a ready video, owner or not', async () => {
+      const owner = await createUserWithChannel();
+      const other = await createUserWithChannel();
+      const { id } = await initiateDraft(owner.userId);
+      await dataSource
+        .getRepository(Video)
+        .update(id, { status: VideoStatus.READY });
+
+      const asOwner = await videosService.getVisibleVideo(owner.userId, id);
+      const asOther = await videosService.getVisibleVideo(other.userId, id);
+      const asAnonymous = await videosService.getVisibleVideo(undefined, id);
+
+      expect(asOwner.isOwner).toBe(true);
+      expect(asOther.isOwner).toBe(false);
+      expect(asAnonymous.isOwner).toBe(false);
+      expect(asAnonymous.video.id).toBe(id);
+    });
+
+    it('answers VIDEO_NOT_FOUND for an unknown id', async () => {
+      await expect(
+        videosService.getVisibleVideo(undefined, randomUUID()),
+      ).rejects.toMatchObject({ errorCode: 'VIDEO_NOT_FOUND' });
+    });
+
+    it('treats a user without a channel as a non-owner', async () => {
+      const owner = await createUserWithChannel();
+      const noChannelUser = await dataSource.getRepository(User).save(
+        dataSource.getRepository(User).create({
+          email: `nochannel_${randomUUID()}@example.com`,
+          password: 'hashed',
+        }),
+      );
+      const { id } = await initiateDraft(owner.userId);
+
+      await expect(
+        videosService.getVisibleVideo(noChannelUser.id, id),
+      ).rejects.toMatchObject({ errorCode: 'VIDEO_NOT_FOUND' });
+    });
+  });
 });

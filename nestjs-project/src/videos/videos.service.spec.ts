@@ -626,3 +626,87 @@ describe('VideosService.completeUpload', () => {
     });
   });
 });
+
+describe('VideosService.getVisibleVideo', () => {
+  const OWNER_CHANNEL = 'channel-owner';
+  let findOne: jest.Mock;
+  let channelsService: { findByUserId: jest.Mock };
+  let service: VideosService;
+
+  function videoWith(status: VideoStatus): Video {
+    return { id: 'video-1', channel_id: OWNER_CHANNEL, status } as Video;
+  }
+
+  beforeEach(() => {
+    findOne = jest.fn();
+    channelsService = {
+      findByUserId: jest.fn((userId: string) =>
+        Promise.resolve(
+          userId === 'owner'
+            ? ({ id: OWNER_CHANNEL } as Channel)
+            : userId === 'other'
+              ? ({ id: 'channel-other' } as Channel)
+              : null,
+        ),
+      ),
+    };
+    const dataSource = { getRepository: jest.fn(() => ({ findOne })) };
+    service = new VideosService(
+      dataSource as unknown as DataSource,
+      channelsService as unknown as ChannelsService,
+      {} as unknown as StorageService,
+      {} as unknown as VideoQueueProducer,
+      config,
+    );
+  });
+
+  const statuses = [
+    VideoStatus.DRAFT,
+    VideoStatus.PROCESSING,
+    VideoStatus.READY,
+    VideoStatus.FAILED,
+  ];
+
+  describe.each(statuses)('video with status %s', (status) => {
+    it('is visible to the owner', async () => {
+      findOne.mockResolvedValue(videoWith(status));
+
+      const result = await service.getVisibleVideo('owner', 'video-1');
+
+      expect(result.isOwner).toBe(true);
+      expect(result.video.status).toBe(status);
+    });
+
+    it.each([
+      ['another user', 'other'],
+      ['a user without a channel', 'no-channel'],
+      ['an anonymous caller', undefined],
+    ])('is %s-visible only when ready', async (_label, userId) => {
+      findOne.mockResolvedValue(videoWith(status));
+
+      const outcome = service.getVisibleVideo(userId, 'video-1');
+
+      if (status === VideoStatus.READY) {
+        await expect(outcome).resolves.toMatchObject({ isOwner: false });
+      } else {
+        await expect(outcome).rejects.toBeInstanceOf(VideoNotFoundException);
+      }
+    });
+  });
+
+  it('throws VideoNotFoundException when the video does not exist', async () => {
+    findOne.mockResolvedValue(null);
+
+    await expect(
+      service.getVisibleVideo('owner', 'video-1'),
+    ).rejects.toBeInstanceOf(VideoNotFoundException);
+  });
+
+  it('does not look up a channel for an anonymous caller', async () => {
+    findOne.mockResolvedValue(videoWith(VideoStatus.READY));
+
+    await service.getVisibleVideo(undefined, 'video-1');
+
+    expect(channelsService.findByUserId).not.toHaveBeenCalled();
+  });
+});

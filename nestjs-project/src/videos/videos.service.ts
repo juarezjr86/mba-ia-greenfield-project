@@ -190,6 +190,37 @@ export class VideosService {
   }
 
   /**
+   * Video the caller may see: the owner reads any status, everyone else
+   * (including an anonymous caller, `userId` undefined) only `ready`. A hidden
+   * video is `VIDEO_NOT_FOUND`, so a draft is not revealed. Ownership is the
+   * caller's channel matching the video's channel, looked up through
+   * `ChannelsService` like in `getOwnedDraft`. Returns the entity (the stream,
+   * download and thumbnail routes need its keys); the route maps it to a DTO.
+   */
+  async getVisibleVideo(
+    userId: string | undefined,
+    videoId: string,
+  ): Promise<{ video: Video; isOwner: boolean }> {
+    const video = await this.dataSource
+      .getRepository(Video)
+      .findOne({ where: { id: videoId } });
+    if (!video) {
+      throw new VideoNotFoundException();
+    }
+
+    let isOwner = false;
+    if (userId) {
+      const channel = await this.channelsService.findByUserId(userId);
+      isOwner = channel?.id === video.channel_id;
+    }
+    if (!isOwner && video.status !== VideoStatus.READY) {
+      throw new VideoNotFoundException();
+    }
+
+    return { video, isOwner };
+  }
+
+  /**
    * Finalizes the multipart upload, moves the video to `processing` and
    * enqueues its job. Idempotent: a video already `processing` is only
    * enqueued again (the fixed job id keeps a single job). The row is locked

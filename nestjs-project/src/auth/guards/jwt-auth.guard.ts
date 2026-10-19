@@ -8,6 +8,7 @@ import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
 import { BEARER_PREFIX } from '../auth.constants';
 import { JwtPayload } from '../auth.types';
+import { OPTIONAL_AUTH_KEY } from '../decorators/optional-auth.decorator';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 
 @Injectable()
@@ -22,12 +23,21 @@ export class JwtAuthGuard implements CanActivate {
       context.getHandler(),
       context.getClass(),
     ]);
-    if (isPublic) return true;
+    const isOptionalAuth =
+      isPublic &&
+      this.reflector.getAllAndOverride<boolean>(OPTIONAL_AUTH_KEY, [
+        context.getHandler(),
+        context.getClass(),
+      ]);
+    if (isPublic && !isOptionalAuth) return true;
 
     const request = context
       .switchToHttp()
       .getRequest<{ headers: Record<string, string>; user: unknown }>();
     const authHeader = request.headers?.authorization;
+
+    // Only a missing header is anonymous; a malformed one is still a 401.
+    if (!authHeader && isOptionalAuth) return true;
 
     if (!authHeader || !authHeader.startsWith(BEARER_PREFIX)) {
       throw new UnauthorizedException();

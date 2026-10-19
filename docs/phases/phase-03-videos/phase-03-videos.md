@@ -1017,7 +1017,7 @@ SIs run one at a time, in numeric order (which respects every edge above); none 
 - [ ] SI-03.12 — Media tools: ffprobe and ffmpeg over a presigned URL
 - [ ] SI-03.13 — Video processor: metadata, thumbnail and failure policy
 - [ ] SI-03.14 — Worker entrypoint and Compose service video-worker
-- [ ] SI-03.15 — Endpoint GET /videos/:id (with optional authentication)
+- [x] SI-03.15 — Endpoint GET /videos/:id (with optional authentication)
 - [ ] SI-03.16 — Endpoint GET /videos/:id/stream
 - [ ] SI-03.17 — Endpoint GET /videos/:id/download
 - [ ] SI-03.18 — Endpoint GET /videos/:id/thumbnail
