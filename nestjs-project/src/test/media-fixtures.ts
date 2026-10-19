@@ -95,3 +95,14 @@ export function jpegSize(image: Buffer): { width: number; height: number } {
   }
   throw new Error('No start-of-frame marker found: not a JPEG');
 }
+
+/**
+ * Bytes that are not a video, the same on every run. Random bytes are not safe
+ * for this: `ffprobe` reads about 1 in 300 random 200 KB files named `.mp4` as
+ * a raw `h263` stream (measured on ffprobe 5.1), so a test using them failed
+ * once in a while. A zero-filled buffer ends `Invalid data found when
+ * processing input` for the `.mp4` storage keys the specs use.
+ */
+export function notAVideo(sizeBytes = 200 * 1024): Buffer {
+  return Buffer.alloc(sizeBytes);
+}

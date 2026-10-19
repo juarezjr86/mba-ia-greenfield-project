@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -23,13 +23,17 @@ import {
   cleanAllTables,
   createTestDataSource,
 } from '../test/create-test-data-source';
-import { generateMp4, jpegSize } from '../test/media-fixtures';
+import { generateMp4, jpegSize, notAVideo } from '../test/media-fixtures';
 import { User } from '../users/entities/user.entity';
 import { Video, VideoStatus } from '../videos/entities/video.entity';
 import { VideoProcessingService } from './video-processing.service';
 
 const ALL_ENTITIES = [User, Channel, RefreshToken, VerificationToken, Video];
 const BUCKET = 'streamtube-test-worker';
+
+// Real ffprobe/ffmpeg over presigned URLs: about 3 s on an idle machine, over
+// the 5 s Jest default when the host is busy.
+jest.setTimeout(60_000);
 
 function testStorageConfig(): ConfigType<typeof storageConfig> {
   return {
@@ -227,7 +231,7 @@ describe('VideoProcessingService (integration, real database, storage and tools)
     const { id } = await createProcessingVideo(
       dataSource,
       storage,
-      randomBytes(200 * 1024),
+      notAVideo(),
     );
     const download = jest.spyOn(storage, 'downloadToFile');
 
@@ -243,7 +247,7 @@ describe('VideoProcessingService (integration, real database, storage and tools)
     const { id } = await createProcessingVideo(
       dataSource,
       storage,
-      randomBytes(200 * 1024),
+      notAVideo(),
     );
     const failure = await service.process(id).catch((e: unknown) => e);
 

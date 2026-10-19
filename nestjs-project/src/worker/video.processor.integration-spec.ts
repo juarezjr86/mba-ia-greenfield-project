@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -28,7 +28,7 @@ import {
   cleanAllTables,
   createTestDataSource,
 } from '../test/create-test-data-source';
-import { generateMp4 } from '../test/media-fixtures';
+import { generateMp4, notAVideo } from '../test/media-fixtures';
 import { User } from '../users/entities/user.entity';
 import { Video, VideoStatus } from '../videos/entities/video.entity';
 import { VideoProcessingModule } from './video-processing.module';
@@ -200,7 +200,7 @@ describe('VideoProcessor (integration, real Redis, database, storage and tools)'
     const { id } = await createProcessingVideo(
       dataSource,
       storage,
-      randomBytes(200 * 1024),
+      notAVideo(),
     );
 
     await producer.enqueueProcessing(id);

@@ -45,10 +45,34 @@ function parseFps(fraction: string | undefined): number | null {
 }
 
 /**
- * Maps the raw ffprobe JSON to the metadata fields. A file without a video
- * stream (audio only, or no stream at all) is unsupported media.
+ * Containers the platform accepts. `ffprobe` reports `format_name` as a comma
+ * list of the demuxer's aliases (`mov,mp4,m4a,3gp,3g2,mj2` for MP4 and
+ * QuickTime, `matroska,webm` for Matroska and WebM), so one token is enough.
+ * Without this check `ffprobe` reads some files that are not videos as one
+ * (measured on ffprobe 5.1, on local files): about 1 in 300 random 200 KB files
+ * named `*.mp4` are a raw `h263` stream, and any file named `*.bin` is a
+ * `bintext` "video". Through a presigned URL the `*.bin` case ended `Invalid
+ * data`; the local path is the one the download fallback uses.
+ */
+const ACCEPTED_CONTAINERS: ReadonlySet<string> = new Set([
+  'mp4',
+  'matroska',
+  'webm',
+]);
+
+/**
+ * Maps the raw ffprobe JSON to the metadata fields. A file whose container is
+ * not accepted, or without a video stream (audio only, or no stream at all),
+ * is unsupported media.
  */
 export function mapProbe(raw: RawProbe): MediaMetadata {
+  const containers = raw.format?.format_name?.split(',') ?? [];
+  if (!containers.some((name) => ACCEPTED_CONTAINERS.has(name))) {
+    throw new UnsupportedMediaError(
+      `Unsupported container format: ${raw.format?.format_name ?? 'unknown'}`,
+    );
+  }
+
   const video = raw.streams?.find((stream) => stream.codec_type === 'video');
   if (!video) {
     throw new UnsupportedMediaError('The file has no video stream');

@@ -85,7 +85,43 @@ describe('mapProbe', () => {
     expect(() => mapProbe(raw)).toThrow(UnsupportedMediaError);
   });
 
+  it.each(['mov,mp4,m4a,3gp,3g2,mj2', 'matroska,webm'])(
+    'accepts the container %s',
+    (formatName) => {
+      const raw = videoProbe();
+      raw.format!.format_name = formatName;
+
+      expect(mapProbe(raw).container_format).toBe(formatName);
+    },
+  );
+
+  it.each(['bin', 'tty', 'h263', 'avi', 'mpegts', 'mp3', 'mp4x', ''])(
+    'rejects the container "%s" even when it has a video stream',
+    (formatName) => {
+      const raw = videoProbe();
+      raw.format!.format_name = formatName;
+
+      expect(() => mapProbe(raw)).toThrow(UnsupportedMediaError);
+      expect(() => mapProbe(raw)).toThrow(/Unsupported container format/);
+    },
+  );
+
+  it('rejects a probe without a format name', () => {
+    const raw = videoProbe();
+    delete raw.format!.format_name;
+
+    expect(() => mapProbe(raw)).toThrow(
+      'Unsupported container format: unknown',
+    );
+  });
+
   it('rejects a probe without streams as unsupported media', () => {
+    const raw = videoProbe({ streams: [] });
+
+    expect(() => mapProbe(raw)).toThrow('The file has no video stream');
+  });
+
+  it('rejects a probe with neither format name nor streams', () => {
     expect(() => mapProbe({ format: { duration: '1' } })).toThrow(
       UnsupportedMediaError,
     );

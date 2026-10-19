@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -11,7 +11,7 @@ import storageConfig from '../config/storage.config';
 import videosConfig from '../config/videos.config';
 import { StorageModule } from '../storage/storage.module';
 import { StorageService } from '../storage/storage.service';
-import { generateMp4, jpegSize } from '../test/media-fixtures';
+import { generateMp4, jpegSize, notAVideo } from '../test/media-fixtures';
 import { RangeCountingProxy } from '../test/range-counting-proxy';
 import { MediaToolError, UnsupportedMediaError } from './media.errors';
 import { MediaModule } from './media.module';
@@ -214,8 +214,23 @@ describe('MediaToolsService (integration, real storage and tools)', () => {
   });
 
   describe('failures', () => {
+    it('a local file named .bin is read by ffprobe as a "bintext" video: the container is refused', async () => {
+      // The local path is what the download fallback hands to the tools. Without
+      // the container check this probe succeeds (1280x10240, exit 0); through a
+      // presigned URL the same bytes already end `Invalid data`.
+      const binPath = join(workDir, 'not-a-video.bin');
+      await writeFile(binPath, notAVideo());
+
+      const failure = await media.probe(binPath).catch((e: unknown) => e);
+
+      expect(failure).toBeInstanceOf(UnsupportedMediaError);
+      expect((failure as Error).message).toBe(
+        'Unsupported container format: bin',
+      );
+    });
+
     it('bytes that are not a video raise UnsupportedMediaError, not MediaToolError', async () => {
-      const { url } = await publishBytes(randomBytes(200 * 1024));
+      const { url } = await publishBytes(notAVideo());
 
       const failure = await media.probe(url).catch((e: unknown) => e);
 
